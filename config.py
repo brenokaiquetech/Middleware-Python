@@ -11,15 +11,15 @@ os.environ["OPENBLAS_NUM_THREADS"] = "1"
 os.environ["OMP_NUM_THREADS"] = "1"
 
 # REDE: valores que normalmente mudam ao instalar em outro local.
-CAMERA_URL = "http://10.121.66.191:8080/video"
-SERVER_PUBLIC_HOST = "10.147.168.37"  # IPv4 do computador na rede da ESP32.
+CAMERA_URL = "http://192.168.43.249:8080/video"
+SERVER_PUBLIC_HOST = "192.168.43.37"  # IPv4 do computador na rede da ESP32.
 HOST = "0.0.0.0"  # Interface em que o servidor escuta; não é o IP da ESP32.
 PORT = 8000  # Usada pelo site e pelos WebSockets.
-ESP32_WIFI_SSID = "SEU_WIFI"
-ESP32_WIFI_PASSWORD = "SUA_SENHA"
+ESP32_WIFI_SSID = "Uaifai Gratis"
+ESP32_WIFI_PASSWORD = "1122334455"
 
 # ESP32 / SERVO POSICIONAL: calibre segundo o modelo e a montagem.
-SERVO_CALIBRATED = False
+SERVO_CALIBRATED = True
 SERVO_PIN = 18
 SERVO_FREQUENCY_HZ = 50
 SERVO_MIN_US = 500  # Exemplo; confirme o pulso mínimo do modelo.
@@ -28,9 +28,9 @@ SERVO_TRAVEL_DEG = 360.0
 
 # ESTEIRA / L9110S: entradas IA e IB de um mesmo canal do driver.
 # Confira os pinos da sua montagem antes de habilitar.
-CONVEYOR_ENABLED = False
-CONVEYOR_PIN_IA = 26
-CONVEYOR_PIN_IB = 27
+CONVEYOR_ENABLED = True
+CONVEYOR_PIN_IA = 25
+CONVEYOR_PIN_IB = 24
 CONVEYOR_FORWARD_IA_HIGH = True  # False inverte o sentido de transporte.
 CONVEYOR_ESTIMATED_SPEED_M_S = 0.10  # Referência visual enquanto ligada; não é medida por sensor.
 ESP32_SERIAL_BAUD = 115200
@@ -92,6 +92,9 @@ SORT_TARGETS = {
 CAMERA_CONNECT_TIMEOUT = 5
 CAMERA_READ_TIMEOUT = 15
 CAMERA_RECONNECT_SECONDS = 2
+CAMERA_CHUNK_SIZE = 4096
+CAMERA_MAX_FRAME_BYTES = 2_000_000
+CAMERA_VALID_FRAME_TIMEOUT = 15  # Reconectar se houver dados, mas nenhum quadro decodificável.
 VIDEO_JPEG_QUALITY = 80
 VIDEO_FRAME_INTERVAL = 0.03
 FRAME_SIZE = (640, 480)

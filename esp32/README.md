@@ -199,6 +199,18 @@ também pode criar um ID novo após oclusão/perda do objeto.
 
 ## Monitoramento das detecções
 
+### Quadros JPEG incompletos
+
+O leitor MJPEG separa os quadros respeitando os segmentos JPEG. Quando chega
+outro início de imagem antes do fim da anterior, descarta a anterior e retoma
+a leitura no novo quadro. Miniaturas dentro de metadados não são tratadas
+como novos quadros. O limite fica em `CAMERA_MAX_FRAME_BYTES`.
+Se nenhum quadro decodificável chegar por `CAMERA_VALID_FRAME_TIMEOUT`, o
+servidor tenta reconectar. Erros de decodificação não interrompem a leitura
+do próximo quadro. Os avisos nativos do codec não foram ocultados: um JPEG
+com dados comprimidos danificados ainda pode gerar avisos mesmo com seus
+marcadores completos. Esta correção não repara dados já corrompidos na origem.
+
 ### Dashboard
 
 Abaixo das detecções, o painel mostra três cartões: temperatura simulada,

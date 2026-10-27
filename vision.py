@@ -7,6 +7,7 @@ import threading
 import time
 from sorting import sorter
 from batch_weights import batch_weights
+from mjpeg import JPEGStreamParser
 
 from config import (
     CAMERA_URL, FRAME_SIZE, MIN_CONTOUR_AREA, MIN_BOX_WIDTH,
@@ -132,6 +133,26 @@ def detect_objects(frame):
     return found, (x1, y1, x2, y2)
 
 
+def read_camera_images(response):
+    """Descarte quadros inválidos e retome o próximo JPEG completo do fluxo."""
+    parser = JPEGStreamParser(config.CAMERA_MAX_FRAME_BYTES)
+    last_valid = time.monotonic()
+    for chunk in response.iter_content(chunk_size=config.CAMERA_CHUNK_SIZE):
+        if not running:
+            return
+        for jpg in parser.feed(chunk):
+            try:
+                frame = cv2.imdecode(np.frombuffer(jpg, dtype=np.uint8), cv2.IMREAD_COLOR)
+            except cv2.error:
+                continue
+            if frame is None or not frame.size:
+                continue
+            last_valid = time.monotonic()
+            yield frame
+        if time.monotonic() - last_valid > config.CAMERA_VALID_FRAME_TIMEOUT:
+            raise ValueError('Fluxo da câmera sem quadros JPEG decodificáveis')
+
+
 def camera_frames():
     """Read JPEG frames from the phone's MJPEG stream and annotate them."""
     global latest_frame, latest_detections
@@ -142,57 +163,33 @@ def camera_frames():
             with session.get(CAMERA_URL, stream=True,
                              timeout=(config.CAMERA_CONNECT_TIMEOUT, config.CAMERA_READ_TIMEOUT)) as response:
                 response.raise_for_status()
-                buffer = b""
-                for chunk in response.iter_content(chunk_size=4096):
-                    if not running:
-                        break
-                    if not chunk:
-                        continue
-                    buffer += chunk
-                    while True:
-                        start = buffer.find(b"\xff\xd8")
-                        end = buffer.find(b"\xff\xd9", start + 2)
-                        if start < 0 or end < 0:
-                            if start > 0:
-                                buffer = buffer[start:]
-                            if len(buffer) > 2_000_000:
-                                buffer = buffer[-100_000:]
-                            break
+                for frame in read_camera_images(response):
+                    # Processing resolution keeps CPU usage modest.
+                    frame = cv2.resize(frame, FRAME_SIZE)
+                    detections, bounds = detect_objects(frame)
+                    x1, y1, x2, y2 = bounds
 
-                        jpg = buffer[start:end + 2]
-                        buffer = buffer[end + 2:]
-                        frame = cv2.imdecode(
-                            np.frombuffer(jpg, dtype=np.uint8), cv2.IMREAD_COLOR
+                    cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 235, 136), 2)
+
+                    for item in detections:
+                        x, y, w, h = item["x"], item["y"], item["w"], item["h"]
+                        cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 235, 136), 2)
+                        label = f'ID {item["id"]} - {item["color"]}'
+                        cv2.putText(
+                            frame, label, (x, max(18, y - 7)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.55,
+                            (0, 235, 136), 2, cv2.LINE_AA
                         )
-                        if frame is None:
-                            continue
 
-                        # Processing resolution keeps CPU usage modest.
-                        frame = cv2.resize(frame, FRAME_SIZE)
-                        detections, bounds = detect_objects(frame)
-                        x1, y1, x2, y2 = bounds
-
-                        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 235, 136), 2)
-
-                        for item in detections:
-                            x, y, w, h = item["x"], item["y"], item["w"], item["h"]
-                            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 235, 136), 2)
-                            label = f'ID {item["id"]} - {item["color"]}'
-                            cv2.putText(
-                                frame, label, (x, max(18, y - 7)),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.55,
-                                (0, 235, 136), 2, cv2.LINE_AA
-                            )
-
-                        with lock:
-                            latest_frame = frame.copy()
-                            latest_detections = [
-                                {k: v for k, v in d.items()
-                                 if k not in ("cx", "cy")}
-                                for d in detections
-                            ]
-                        sorter.observe(detections)
-                        batch_weights.observe(detections)
+                    with lock:
+                        latest_frame = frame.copy()
+                        latest_detections = [
+                            {k: v for k, v in d.items()
+                             if k not in ("cx", "cy")}
+                            for d in detections
+                        ]
+                    sorter.observe(detections)
+                    batch_weights.observe(detections)
         except Exception as exc:
             print(f"[câmera] {exc}. Tentando reconectar em {config.CAMERA_RECONNECT_SECONDS} segundos...")
             time.sleep(config.CAMERA_RECONNECT_SECONDS)
