@@ -178,7 +178,7 @@ class SortingSocketTests(unittest.TestCase):
         confirm(self.sorter, 3, 'Roxo')
         second = self.receive(client)
         self.assertEqual(second['container'], 'D')
-        self.assertEqual(second['angle_deg'], 270)
+        self.assertEqual(second['angle_deg'], config.SORT_TARGETS['Roxo']['angle_deg'])
         self.assertNotEqual(second['command_id'], first['command_id'])
 
     def test_second_motor_client_is_rejected(self):

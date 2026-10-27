@@ -11,7 +11,7 @@ os.environ["OPENBLAS_NUM_THREADS"] = "1"
 os.environ["OMP_NUM_THREADS"] = "1"
 
 # REDE: valores que normalmente mudam ao instalar em outro local.
-CAMERA_URL = "http://192.168.43.249:8080/video"
+CAMERA_URL = "http://10.99.137.209:8080/video"
 SERVER_PUBLIC_HOST = "192.168.43.37"  # IPv4 do computador na rede da ESP32.
 HOST = "0.0.0.0"  # Interface em que o servidor escuta; não é o IP da ESP32.
 PORT = 8000  # Usada pelo site e pelos WebSockets.
@@ -24,13 +24,13 @@ SERVO_PIN = 18
 SERVO_FREQUENCY_HZ = 50
 SERVO_MIN_US = 500  # Exemplo; confirme o pulso mínimo do modelo.
 SERVO_MAX_US = 2500  # Exemplo; confirme o pulso máximo do modelo.
-SERVO_TRAVEL_DEG = 360.0
+SERVO_TRAVEL_DEG = 180.0
 
 # ESTEIRA / L9110S: entradas IA e IB de um mesmo canal do driver.
 # Confira os pinos da sua montagem antes de habilitar.
 CONVEYOR_ENABLED = True
-CONVEYOR_PIN_IA = 25
-CONVEYOR_PIN_IB = 24
+CONVEYOR_PIN_IA = 26
+CONVEYOR_PIN_IB = 25  # Ligue fisicamente IB do mesmo canal do L9110S a este GPIO.
 CONVEYOR_FORWARD_IA_HIGH = True  # False inverte o sentido de transporte.
 CONVEYOR_ESTIMATED_SPEED_M_S = 0.10  # Referência visual enquanto ligada; não é medida por sensor.
 ESP32_SERIAL_BAUD = 115200
@@ -77,15 +77,15 @@ SORT_WS_PATH = "/ws/sorter"
 SORT_CONFIRM_FRAMES = 3
 SORT_ACK_TIMEOUT_SECONDS = 15
 SORT_STOP_MS = 200  # Intervalo entre mandar parar e movimentar o prato.
-SORT_SETTLE_MS = 800  # Estimativa; calibrar com o servo e a carga reais.
+SORT_SETTLE_MS = 1500  # Aguarde o posicionamento; ajuste com a carga real.
 
 # Ângulos do SERVO que alinham cada recipiente com a saída da esteira.
 # Calibre o sentido e o zero com o prato montado.
 SORT_TARGETS = {
     "Laranja": {"container": "A", "material": "Plástico", "angle_deg": 0},
-    "Verde-claro": {"container": "B", "material": "Alumínio", "angle_deg": 90},
-    "Azul-claro": {"container": "C", "material": "Metal", "angle_deg": 180},
-    "Roxo": {"container": "D", "material": "Rejeito", "angle_deg": 270},
+    "Verde-claro": {"container": "B", "material": "Alumínio", "angle_deg": 60},
+    "Azul-claro": {"container": "C", "material": "Metal", "angle_deg": 120},
+    "Roxo": {"container": "D", "material": "Rejeito", "angle_deg": 180},
 }
 
 # CÂMERA / VISÃO: parâmetros mantidos do processamento original.

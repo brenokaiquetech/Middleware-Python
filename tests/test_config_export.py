@@ -31,6 +31,18 @@ class ConfigExportTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 build_header()
 
+    def test_angle_outside_servo_travel_is_rejected_before_upload(self):
+        with patch.multiple(config, SERVO_TRAVEL_DEG=180,
+                            SORT_TARGETS={'Roxo': {'angle_deg': 270}}):
+            with self.assertRaisesRegex(ValueError, 'Roxo'):
+                build_header()
+
+    def test_invalid_servo_travel_is_rejected(self):
+        for travel in (0, -1, float('nan'), float('inf'), True):
+            with self.subTest(travel=travel), patch.object(config, 'SERVO_TRAVEL_DEG', travel):
+                with self.assertRaises(ValueError):
+                    build_header()
+
     def test_wifi_strings_are_escaped_for_cpp(self):
         with patch.multiple(config, ESP32_WIFI_SSID='Rede "teste"',
                             ESP32_WIFI_PASSWORD='teste\\senha\nlinha'):

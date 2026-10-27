@@ -1,5 +1,6 @@
 """Gera as constantes C++ da placa a partir de config.py, sem dependências extras."""
 import json
+import math
 from pathlib import Path
 
 import config
@@ -8,6 +9,15 @@ OUTPUT_PATH = Path(__file__).resolve().parent / 'esp32' / 'EcoCycleClient' / 'Ec
 
 
 def build_header():
+    travel = config.SERVO_TRAVEL_DEG
+    if (not isinstance(travel, (int, float)) or isinstance(travel, bool)
+            or not math.isfinite(travel) or travel <= 0):
+        raise ValueError('SERVO_TRAVEL_DEG deve ser um número positivo e finito.')
+    for color, target in config.SORT_TARGETS.items():
+        angle = target.get('angle_deg')
+        if (not isinstance(angle, (int, float)) or isinstance(angle, bool)
+                or not math.isfinite(angle) or not 0 <= angle <= travel):
+            raise ValueError(f'Ângulo de {color} fora do curso de 0 a {travel} graus em config.py.')
     lines = [
         '#pragma once',
         '// GERADO a partir de config.py. Edite config.py, nao este arquivo.',

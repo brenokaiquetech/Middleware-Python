@@ -1,23 +1,27 @@
-# ESP32: separar objetos por cor com servo posicional de 360°
+# ESP32: separar objetos por cor com servo posicional
 
 O computador interpreta a câmera e a ESP32 controla a esteira e o prato.
 O ciclo é **identificar → parar a esteira → posicionar o recipiente →
 retomar a esteira até identificar outra peça**. O controle
-implementado é para **servo posicional 0–360°**, conforme informado, não para
+implementado é para **servo posicional**, com curso em `SERVO_TRAVEL_DEG`, não para
 servo de rotação contínua. Os materiais abaixo são uma associação configurada
 por cor; não são identificados fisicamente pela câmera.
 
 | Cor detectada | Recipiente | Material atribuído | Ângulo inicial |
 |---|---|---|---|
 | Laranja | A | Plástico | 0° |
-| Verde-claro | B | Alumínio | 90° |
-| Azul-claro | C | Metal | 180° |
-| Roxo | D | Rejeito | 270° |
+| Verde-claro | B | Alumínio | 60° |
+| Azul-claro | C | Metal | 120° |
+| Roxo | D | Rejeito | 180° |
 
 Esses ângulos representam posições do eixo que devem alinhar o recipiente
 com a queda da esteira. A imagem não determina o zero nem o sentido do servo:
 calibre `SORT_TARGETS` em `config.py` na montagem real. Verde e azul continuam
 usando as mesmas faixas HSV anteriores (`Verde-claro` e `Azul-claro`).
+O servo atual foi confirmado como 180°: os quatro destinos estão distribuídos
+nesse curso como referência inicial. Ajuste os ângulos à posição real dos
+recipientes. Um prato que exija uma volta inteira precisa de uma montagem
+mecânica compatível; o software não aumenta o curso físico do servo.
 
 ## Câmera fixa e captura do fundo
 
@@ -111,7 +115,8 @@ Em `config.py` (exportado automaticamente para `EcoCycleConfig.h`):
 - `SERVO_MIN_US`, `SERVO_MAX_US`, `SERVO_FREQUENCY_HZ`: consulte o datasheet
   do modelo e calibre. **500–2500 µs e 50 Hz são valores de exemplo**, não uma
   especificação confirmada do seu servo.
-- `SERVO_TRAVEL_DEG`: 360°, para o servo posicional informado.
+- `SERVO_TRAVEL_DEG`: atualmente 180°, conforme o servo confirmado.
+  A geração da configuração rejeita destinos fora desse curso.
 - `SERVO_CALIBRATED`: inicia em `False`; o firmware recebe os comandos mas
   responde `error` e não conecta o PWM. Configure os limites reais e então
   mude para `True`, gere o arquivo e regrave a placa para habilitar o acionamento.
@@ -131,14 +136,16 @@ canal. Os valores iniciais no `config.py` são:
 
 | Conexão | Configuração | Valor inicial |
 |---|---|---|
-| Entrada IA do canal do driver | `CONVEYOR_PIN_IA` | GPIO 26 |
-| Entrada IB do mesmo canal | `CONVEYOR_PIN_IB` | GPIO 27 |
+| Entrada IA do canal do driver | `CONVEYOR_PIN_IA` | GPIO 25 |
+| Entrada IB do mesmo canal | `CONVEYOR_PIN_IB` | GPIO 26 |
 | Sinal do servo | `SERVO_PIN` | GPIO 18 |
 | Sentido do transporte | `CONVEYOR_FORWARD_IA_HIGH` | `True` |
 
 Confirme os GPIOs disponíveis no seu modelo de ESP32 e adapte à fiação real.
 Os três pinos devem ser diferentes. Motor TT é ligado ao driver; não ao GPIO.
 Una o GND da ESP32 ao GND do driver e use alimentação compatível com o motor.
+**IB não pode ficar flutuando.** Ligue fisicamente IA ao GPIO 25 e IB ao GPIO
+26, ambos do mesmo canal do L9110S. Alterar o código não substitui essa ligação.
 
 Habilite `CONVEYOR_ENABLED = True` depois de conferir as ligações. Para iniciar
 o transporte, `SERVO_CALIBRATED` também precisa estar em `True`. O firmware
@@ -149,7 +156,10 @@ Esta versão liga/desliga o motor; não regula a velocidade por PWM.
 
 Ao detectar a desconexão do WebSocket, o firmware para a esteira. Se houver
 um ciclo em andamento, conclui o posicionamento mas só retoma o transporte
-quando a conexão for restabelecida. Um erro de comando também para a esteira.
+quando a conexão for restabelecida. Comandos com ângulo/tempo inválido são
+rejeitados com motivo no Monitor Serial, sem travar a esteira nem interromper
+um ciclo válido em andamento. Quando conectada e livre, a placa mantém a
+esteira ligada, mesmo sem detecções.
 
 ### Tempo de transporte e espaçamento dos objetos
 
@@ -159,7 +169,7 @@ Ao receber o comando, a ESP32:
 1. Para o motor da esteira.
 2. Aguarda `SORT_STOP_MS` (padrão 200 ms), para acomodar a parada mecânica.
 3. Aplica ao servo o ângulo do recipiente correspondente.
-4. Aguarda `SORT_SETTLE_MS` (padrão 800 ms), para posicionamento.
+4. Aguarda `SORT_SETTLE_MS` (atualmente 1500 ms), para posicionamento.
 5. Religa a esteira e responde `done`, com `conveyor_running: true`.
 
 O recipiente permanece nessa posição até a próxima peça. Não há espera

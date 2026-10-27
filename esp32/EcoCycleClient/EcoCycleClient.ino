@@ -50,11 +50,12 @@ void stopConveyor() {
 }
 
 void startConveyor() {
-  if (!hardwareReady() || !serverReady || phase != IDLE) return;
+  if (conveyorRunning || !hardwareReady() || !serverReady || phase != IDLE) return;
   digitalWrite(CONVEYOR_PIN_IA, CONVEYOR_FORWARD_IA_HIGH ? HIGH : LOW);
   digitalWrite(CONVEYOR_PIN_IB, CONVEYOR_FORWARD_IA_HIGH ? LOW : HIGH);
   conveyorRunning = true;
   reportConveyorState();
+  Serial.println("Esteira ligada. Aguardando novo material.");
 }
 
 void acknowledge(const String& session, const String& command, const char* status) {
@@ -83,11 +84,19 @@ void startSortCycle(JsonDocument& doc) {
   float angle = doc["angle_deg"].as<float>();
   uint32_t stopMs = doc["stop_ms"] | DEFAULT_STOP_MS;
   uint32_t settleMs = doc["settle_ms"] | DEFAULT_SETTLE_MS;
-  if (!hardwareReady() || !serverReady || phase != IDLE || doc["angle_deg"].isNull()
-      || !isfinite(angle) || angle < 0 || angle > SERVO_TRAVEL_DEG
-      || settleMs > MAX_MOVEMENT_STAGE_MS || stopMs > MAX_MOVEMENT_STAGE_MS) {
-    stopConveyor();
-    Serial.println("Comando rejeitado: confira servo, esteira, angulo e tempos.");
+  const char* reason = nullptr;
+  if (!SERVO_CALIBRATED) reason = "servo desabilitado";
+  else if (!CONVEYOR_ENABLED) reason = "esteira desabilitada";
+  else if (!serverReady) reason = "servidor indisponivel";
+  else if (phase != IDLE) reason = "ciclo em andamento";
+  else if (doc["angle_deg"].isNull() || !isfinite(angle)
+           || angle < 0 || angle > SERVO_TRAVEL_DEG) reason = "angulo fora do curso do servo";
+  else if (settleMs > MAX_MOVEMENT_STAGE_MS || stopMs > MAX_MOVEMENT_STAGE_MS)
+    reason = "tempo acima do limite";
+  if (reason != nullptr) {
+    // Rejeitar um comando nao deve parar o transporte nem interromper um
+    // ciclo valido. A parada por desconexao continua sendo tratada separadamente.
+    Serial.printf("Comando rejeitado: %s.\n", reason);
     acknowledge(session, command, "error");
     return;
   }
@@ -194,6 +203,9 @@ void loop() {
     if (serverReady) acknowledge(completedSession, completedCommand, "done");
     Serial.println(conveyorRunning ? "Recipiente pronto. Esteira retomada." : "Recipiente pronto. Aguardando conexao.");
   }
+  // O estado livre mantem a esteira ligada, mesmo sem imagens/deteccoes e
+  // depois de uma rejeicao. startConveyor so escreve os pinos ao mudar de estado.
+  if (phase == IDLE) startConveyor();
   if (serverReady && (uint32_t)(millis() - lastTelemetryAt) >= TELEMETRY_INTERVAL_MS) {
     reportConveyorState();
   }
