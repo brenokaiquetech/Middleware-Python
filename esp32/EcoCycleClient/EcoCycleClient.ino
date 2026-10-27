@@ -17,6 +17,7 @@ enum CyclePhase { IDLE, STOPPING_CONVEYOR, POSITIONING_CONTAINER };
 CyclePhase phase = IDLE;
 bool serverReady = false;
 bool conveyorRunning = false;
+bool servoReady = false;
 uint32_t phaseStarted = 0;
 uint32_t stopDuration = 0;
 uint32_t settleDuration = 0;
@@ -24,7 +25,7 @@ int targetPulseUs = 0;
 uint32_t lastTelemetryAt = 0;
 
 bool hardwareReady() {
-  return SERVO_CALIBRATED && CONVEYOR_ENABLED;
+  return SERVO_CALIBRATED && servoReady && CONVEYOR_ENABLED;
 }
 
 void reportConveyorState() {
@@ -55,7 +56,7 @@ void startConveyor() {
   digitalWrite(CONVEYOR_PIN_IB, CONVEYOR_FORWARD_IA_HIGH ? LOW : HIGH);
   conveyorRunning = true;
   reportConveyorState();
-  Serial.println("Esteira ligada. Aguardando novo material.");
+  Serial.printf("[%lu ms] Esteira ligada. Aguardando novo material.\n", (unsigned long)millis());
 }
 
 void acknowledge(const String& session, const String& command, const char* status) {
@@ -86,6 +87,7 @@ void startSortCycle(JsonDocument& doc) {
   uint32_t settleMs = doc["settle_ms"] | DEFAULT_SETTLE_MS;
   const char* reason = nullptr;
   if (!SERVO_CALIBRATED) reason = "servo desabilitado";
+  else if (!servoReady) reason = "PWM do servo nao inicializado";
   else if (!CONVEYOR_ENABLED) reason = "esteira desabilitada";
   else if (!serverReady) reason = "servidor indisponivel";
   else if (phase != IDLE) reason = "ciclo em andamento";
@@ -108,13 +110,14 @@ void startSortCycle(JsonDocument& doc) {
   activeSession = session;
   stopDuration = stopMs;
   settleDuration = settleMs;
-  stopConveyor();
   phase = STOPPING_CONVEYOR;
   phaseStarted = millis();
+  stopConveyor();
   const char* container = doc["container"] | "";
   const char* material = doc["material"] | "";
-  Serial.printf("Esteira parada. Recipiente %s | %s | %.1f graus | %d us\n",
-                container, material, angle, targetPulseUs);
+  Serial.printf("[%lu ms] Esteira parada. Recipiente %s | %s | %.1f graus | %d us | espera %lu ms\n",
+                (unsigned long)phaseStarted, container, material, angle, targetPulseUs,
+                (unsigned long)stopDuration);
 }
 
 void onWebSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
@@ -165,6 +168,10 @@ void setup() {
   if (SERVO_CALIBRATED) {
     plateServo.setPeriodHertz(SERVO_FREQUENCY_HZ);
     plateServo.attach(SERVO_PIN, SERVO_MIN_US, SERVO_MAX_US);
+    servoReady = plateServo.attached();
+    Serial.printf("Servo GPIO %lu: PWM %s | %lu Hz | %lu a %lu us\n",
+                  SERVO_PIN, servoReady ? "ativo" : "FALHOU",
+                  SERVO_FREQUENCY_HZ, SERVO_MIN_US, SERVO_MAX_US);
   } else {
     Serial.println("Servo desabilitado: calibre em config.py, gere a configuracao e reenvie o firmware.");
   }
@@ -192,7 +199,9 @@ void loop() {
     plateServo.writeMicroseconds(targetPulseUs);
     phase = POSITIONING_CONTAINER;
     phaseStarted = millis();
-    Serial.println("Posicionando recipiente com a esteira parada.");
+    Serial.printf("[%lu ms] Servo recebeu %d us. Espera apos parada: %lu ms. Acomodacao: %lu ms.\n",
+                  (unsigned long)millis(), targetPulseUs, (unsigned long)elapsed,
+                  (unsigned long)settleDuration);
   } else if (phase == POSITIONING_CONTAINER && elapsed >= settleDuration) {
     phase = IDLE;
     completedCommand = activeCommand;

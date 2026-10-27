@@ -136,16 +136,17 @@ canal. Os valores iniciais no `config.py` são:
 
 | Conexão | Configuração | Valor inicial |
 |---|---|---|
-| Entrada IA do canal do driver | `CONVEYOR_PIN_IA` | GPIO 25 |
-| Entrada IB do mesmo canal | `CONVEYOR_PIN_IB` | GPIO 26 |
+| Entrada IA do canal do driver | `CONVEYOR_PIN_IA` | GPIO 26 |
+| Entrada IB do mesmo canal | `CONVEYOR_PIN_IB` | GPIO 25 |
 | Sinal do servo | `SERVO_PIN` | GPIO 18 |
 | Sentido do transporte | `CONVEYOR_FORWARD_IA_HIGH` | `True` |
 
 Confirme os GPIOs disponíveis no seu modelo de ESP32 e adapte à fiação real.
 Os três pinos devem ser diferentes. Motor TT é ligado ao driver; não ao GPIO.
 Una o GND da ESP32 ao GND do driver e use alimentação compatível com o motor.
-**IB não pode ficar flutuando.** Ligue fisicamente IA ao GPIO 25 e IB ao GPIO
-26, ambos do mesmo canal do L9110S. Alterar o código não substitui essa ligação.
+**IB não pode ficar flutuando.** As duas entradas precisam estar ligadas aos
+GPIOs atuais do `config.py`, no mesmo canal do L9110S. Alterar o código não
+substitui essa ligação.
 
 Habilite `CONVEYOR_ENABLED = True` depois de conferir as ligações. Para iniciar
 o transporte, `SERVO_CALIBRATED` também precisa estar em `True`. O firmware
@@ -162,6 +163,14 @@ um ciclo válido em andamento. Quando conectada e livre, a placa mantém a
 esteira ligada, mesmo sem detecções.
 
 ### Tempo de transporte e espaçamento dos objetos
+
+A captura drena continuamente o vídeo em uma thread, enquanto outra rotina
+analisa o quadro mais recente. Só um quadro fica pendente, sendo substituído
+quando chega outro; não existe fila de imagens nem de materiais. Um quadro
+que passou mais de `CAMERA_MAX_PENDING_FRAME_AGE_SECONDS` (padrão 0,5 s)
+aguardando processamento local é descartado. Esse limite não mede o atraso
+interno do celular ou da rede. O comando é criado antes de desenhar o vídeo.
+O WebSocket consulta comandos a cada `SORT_POLL_INTERVAL_SECONDS` (0,01 s).
 
 O comando é criado após `SORT_CONFIRM_FRAMES` quadros consecutivos (padrão 3).
 Ao receber o comando, a ESP32:
@@ -180,6 +189,31 @@ Calibre os tempos de parada e posicionamento em `config.py`. Eles são
 estimativas; sem sensores não confirmam parada total ou alinhamento físico.
 A câmera deve identificar a peça antes de ela alcançar a saída. Deixe
 `SORT_ACK_TIMEOUT_SECONDS` maior que a soma dos tempos.
+
+Posicione a ROI antes da saída da esteira, deixando distância suficiente para
+a confirmação nos quadros, a transmissão e a parada física. A espera de
+200 ms ocorre depois do comando de parada e antes de aplicar o pulso no servo.
+Os 1500 ms seguintes são para o movimento; não atrasam o envio desse pulso.
+As mensagens da placa incluem `millis()` para comparar esses dois momentos.
+O firmware verifica se a inicialização do PWM foi bem-sucedida e informa
+`PWM ativo` ou `PWM FALHOU` no boot. Isso não confirma movimento físico.
+
+### Teste isolado do SG90
+
+Se o servo não mover, gere as configurações com
+`python generate_esp32_config.py` e abra `TesteServo/TesteServo.ino` na Arduino
+IDE. Esse sketch usa os mesmos pinos, frequência e pulsos do `config.py` e
+mantém as entradas da esteira em LOW. Não usa câmera nem Wi-Fi.
+
+Com o curso atual de 180°, alterna 90°, 60° e 120° a cada
+`SERVO_TEST_STEP_MS` (2000 ms). Teste sem o prato/carga e acompanhe o Monitor
+Serial em 115200 baud. As mensagens indicam os pulsos aplicados. Se o PWM
+inicializar mas o servo não se mover nesse teste, investigue fiação,
+alimentação, carga ou o próprio servo. Regrave `EcoCycleClient.ino` para
+retornar à operação normal.
+
+Peças da mesma cor usam o mesmo ângulo; se o recipiente já está alinhado,
+não haverá novo deslocamento do servo.
 
 **Mantenha as peças espaçadas.** A peça anterior precisa cair no recipiente
 antes que outra peça provoque uma troca de recipiente. A retomada mantém o

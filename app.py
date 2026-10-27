@@ -6,7 +6,7 @@ from flask import Flask, Response, jsonify, request, send_from_directory
 import os
 import threading
 from sorting import sorter
-from generate_esp32_config import write_esp32_config
+from generate_esp32_config import write_esp32_configs
 from temperature import temperature
 from batch_weights import batch_weights, BatchConflict
 
@@ -116,7 +116,7 @@ def video():
 
 
 if __name__ == "__main__":
-    write_esp32_config()
+    write_esp32_configs()
     os.makedirs(app.static_folder, exist_ok=True)
     thread = threading.Thread(target=vision.camera_frames, daemon=True)
     thread.start()

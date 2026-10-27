@@ -25,6 +25,7 @@ SERVO_FREQUENCY_HZ = 50
 SERVO_MIN_US = 500  # Exemplo; confirme o pulso mínimo do modelo.
 SERVO_MAX_US = 2500  # Exemplo; confirme o pulso máximo do modelo.
 SERVO_TRAVEL_DEG = 180.0
+SERVO_TEST_STEP_MS = 2000  # Intervalo do sketch de diagnóstico do servo.
 
 # ESTEIRA / L9110S: entradas IA e IB de um mesmo canal do driver.
 # Confira os pinos da sua montagem antes de habilitar.
@@ -76,6 +77,7 @@ SORT_WS_PATH = "/ws/sorter"
 # SEPARAÇÃO: tempos e posições precisam de calibração na esteira.
 SORT_CONFIRM_FRAMES = 3
 SORT_ACK_TIMEOUT_SECONDS = 15
+SORT_POLL_INTERVAL_SECONDS = 0.01  # Espera máxima entre consultas do comando atual.
 SORT_STOP_MS = 200  # Intervalo entre mandar parar e movimentar o prato.
 SORT_SETTLE_MS = 1500  # Aguarde o posicionamento; ajuste com a carga real.
 
@@ -95,6 +97,7 @@ CAMERA_RECONNECT_SECONDS = 2
 CAMERA_CHUNK_SIZE = 4096
 CAMERA_MAX_FRAME_BYTES = 2_000_000
 CAMERA_VALID_FRAME_TIMEOUT = 15  # Reconectar se houver dados, mas nenhum quadro decodificável.
+CAMERA_MAX_PENDING_FRAME_AGE_SECONDS = 0.5  # Descarte quadro parado no processamento local.
 VIDEO_JPEG_QUALITY = 80
 VIDEO_FRAME_INTERVAL = 0.03
 FRAME_SIZE = (640, 480)

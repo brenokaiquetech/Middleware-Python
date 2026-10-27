@@ -8,11 +8,20 @@ from generate_esp32_config import build_header, write_esp32_config
 
 
 class ConfigExportTests(unittest.TestCase):
+    def test_servo_diagnostic_header_uses_same_pins_without_wifi_credentials(self):
+        source = build_header(include_network=False)
+        self.assertNotIn('WIFI_PASSWORD', source)
+        self.assertNotIn('WIFI_SSID', source)
+        self.assertNotIn('SERVER_HOST', source)
+        self.assertIn(f'SERVO_PIN = {config.SERVO_PIN}UL;', source)
+        self.assertIn(f'CONVEYOR_PIN_IB = {config.CONVEYOR_PIN_IB}UL;', source)
+
     def test_network_and_servo_are_exported_from_config(self):
         with patch.multiple(config, SERVER_PUBLIC_HOST='192.168.1.50', PORT=9001,
                             SORT_WS_PATH='/ws/test', SERVO_PIN=23,
                             SERVO_CALIBRATED=True, SORT_STOP_MS=300,
                             CONVEYOR_ENABLED=True, CONVEYOR_PIN_IA=25,
+                            CONVEYOR_PIN_IB=26,
                             CONVEYOR_FORWARD_IA_HIGH=False):
             source = build_header()
         self.assertIn('SERVER_HOST = "192.168.1.50";', source)

@@ -9,6 +9,7 @@ from sorting import sorter
 from batch_weights import batch_weights
 from mjpeg import JPEGStreamParser
 from background import BackgroundFilter
+from camera_buffer import LatestCameraFrame
 
 from config import (
     CAMERA_URL, FRAME_SIZE, MIN_CONTOUR_AREA, MIN_BOX_WIDTH,
@@ -182,10 +183,9 @@ def read_camera_images(response):
             raise ValueError('Fluxo da câmera sem quadros JPEG decodificáveis')
 
 
-def camera_frames():
-    """Read JPEG frames from the phone's MJPEG stream and annotate them."""
+def capture_camera(buffer):
+    """Drene o vídeo continuamente, mesmo durante a análise de outro quadro."""
     global latest_frame, latest_detections
-
     session = requests.Session()
     while running:
         try:
@@ -193,39 +193,62 @@ def camera_frames():
                              timeout=(config.CAMERA_CONNECT_TIMEOUT, config.CAMERA_READ_TIMEOUT)) as response:
                 response.raise_for_status()
                 for frame in read_camera_images(response):
-                    # Processing resolution keeps CPU usage modest.
-                    frame = cv2.resize(frame, FRAME_SIZE)
-                    detections, bounds = detect_objects(frame)
-                    x1, y1, x2, y2 = bounds
-
-                    cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 235, 136), 2)
-
-                    for item in detections:
-                        x, y, w, h = item["x"], item["y"], item["w"], item["h"]
-                        cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 235, 136), 2)
-                        label = f'ID {item["id"]} - {item["color"]}'
-                        cv2.putText(
-                            frame, label, (x, max(18, y - 7)),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.55,
-                            (0, 235, 136), 2, cv2.LINE_AA
-                        )
-
-                    with lock:
-                        # Um pedido de recaptura invalida este quadro antes
-                        # de publicar resultados ou interpretar materiais.
-                        if background_reset_requested:
-                            detections = []
-                        latest_frame = frame.copy()
-                        latest_detections = [
-                            {k: v for k, v in d.items()
-                             if k not in ("cx", "cy")}
-                            for d in detections
-                        ]
-                        sorter.observe(detections)
-                        batch_weights.observe(detections)
+                    buffer.publish(frame)
+                if running:
+                    raise ValueError('Fluxo da câmera encerrado')
         except Exception as exc:
+            buffer.clear()
+            with lock:
+                latest_frame = None
+                latest_detections = []
+                sorter.observe([])
+                batch_weights.observe([])
             print(f"[câmera] {exc}. Tentando reconectar em {config.CAMERA_RECONNECT_SECONDS} segundos...")
             time.sleep(config.CAMERA_RECONNECT_SECONDS)
+
+
+def process_camera_frame(frame):
+    """Crie o comando antes de desenhar as caixas e atualizar o vídeo."""
+    global latest_frame, latest_detections
+    frame = cv2.resize(frame, FRAME_SIZE)
+    detections, bounds = detect_objects(frame)
+    with lock:
+        if background_reset_requested:
+            detections = []
+        sorter.observe(detections)
+        batch_weights.observe(detections)
+
+    x1, y1, x2, y2 = bounds
+    cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 235, 136), 2)
+    for item in detections:
+        x, y, w, h = item['x'], item['y'], item['w'], item['h']
+        cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 235, 136), 2)
+        cv2.putText(frame, f'ID {item["id"]} - {item["color"]}',
+                    (x, max(18, y - 7)), cv2.FONT_HERSHEY_SIMPLEX,
+                    0.55, (0, 235, 136), 2, cv2.LINE_AA)
+    with lock:
+        latest_frame = frame.copy()
+        latest_detections = [] if background_reset_requested else [
+            {k: v for k, v in item.items() if k not in ('cx', 'cy')}
+            for item in detections
+        ]
+
+
+def camera_frames():
+    """Analise o quadro mais recente, sem acumular imagens para processar."""
+    buffer = LatestCameraFrame()
+    threading.Thread(target=capture_camera, args=(buffer,), daemon=True).start()
+    while running:
+        packet = buffer.take(timeout=0.1)
+        if packet is None:
+            continue
+        frame, received_at = packet
+        if time.monotonic() - received_at > config.CAMERA_MAX_PENDING_FRAME_AGE_SECONDS:
+            continue
+        try:
+            process_camera_frame(frame)
+        except Exception as exc:
+            print(f'[visão] Quadro descartado: {exc}')
 
 
 def video_frames():

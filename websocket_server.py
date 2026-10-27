@@ -49,7 +49,7 @@ def init_websocket(app, get_snapshot, sorter, temperature=None):
                     ws.close()
                     return
                 # Receba estado também quando não há um ciclo em andamento.
-                raw = ws.receive(timeout=0.05)
+                raw = ws.receive(timeout=config.SORT_POLL_INTERVAL_SECONDS)
                 if raw is None:
                     continue
                 try:

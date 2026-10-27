@@ -6,9 +6,10 @@ from pathlib import Path
 import config
 
 OUTPUT_PATH = Path(__file__).resolve().parent / 'esp32' / 'EcoCycleClient' / 'EcoCycleConfig.h'
+SERVO_TEST_OUTPUT_PATH = OUTPUT_PATH.parents[1] / 'TesteServo' / 'EcoCycleConfig.h'
 
 
-def build_header():
+def build_header(include_network=True):
     travel = config.SERVO_TRAVEL_DEG
     if (not isinstance(travel, (int, float)) or isinstance(travel, bool)
             or not math.isfinite(travel) or travel <= 0):
@@ -29,7 +30,7 @@ def build_header():
         'WIFI_PASSWORD': config.ESP32_WIFI_PASSWORD,
         'SERVER_HOST': config.SERVER_PUBLIC_HOST,
         'SERVER_PATH': config.SORT_WS_PATH,
-    }
+    } if include_network else {}
     for name, value in strings.items():
         lines.append(f'constexpr const char* {name} = {json.dumps(value, ensure_ascii=False)};')
     integers = {
@@ -38,6 +39,7 @@ def build_header():
         'SERVO_FREQUENCY_HZ': config.SERVO_FREQUENCY_HZ,
         'SERVO_MIN_US': config.SERVO_MIN_US,
         'SERVO_MAX_US': config.SERVO_MAX_US,
+        'SERVO_TEST_STEP_MS': config.SERVO_TEST_STEP_MS,
         'CONVEYOR_PIN_IA': config.CONVEYOR_PIN_IA,
         'CONVEYOR_PIN_IB': config.CONVEYOR_PIN_IB,
         'SERIAL_BAUD': config.ESP32_SERIAL_BAUD,
@@ -64,14 +66,19 @@ def build_header():
     return '\n'.join(lines)
 
 
-def write_esp32_config(path=OUTPUT_PATH):
+def write_esp32_config(path=OUTPUT_PATH, include_network=True):
     path = Path(path)
-    source = build_header()
+    source = build_header(include_network=include_network)
     if not path.exists() or path.read_text(encoding='utf-8') != source:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(source, encoding='utf-8')
     return path
 
 
+def write_esp32_configs():
+    return write_esp32_config(), write_esp32_config(SERVO_TEST_OUTPUT_PATH, include_network=False)
+
+
 if __name__ == '__main__':
-    print(f'Configuração ESP32 gerada: {write_esp32_config()}')
+    for path in write_esp32_configs():
+        print(f'Configuração ESP32 gerada: {path}')
