@@ -100,6 +100,13 @@ VIDEO_FRAME_INTERVAL = 0.03
 FRAME_SIZE = (640, 480)
 DEFAULT_ROI = {"x": 0.15, "y": 0.15, "w": 0.70, "h": 0.70}
 
+# Câmera fixa: mantenha a esteira vazia durante a captura inicial do fundo.
+BACKGROUND_WARMUP_SECONDS = 2.0
+BACKGROUND_MIN_FRAMES = 10  # Uma pausa do vídeo não basta para concluir a captura.
+BACKGROUND_IGNORE_MARGIN_PX = 3  # Margem nas regiões coloridas do cenário inicial.
+BACKGROUND_DIFF_THRESHOLD = 35  # Diferença mínima em um canal BGR (0–255).
+BACKGROUND_MIN_CHANGED_RATIO = 0.60  # Fração do contorno diferente do fundo.
+
 # Limites HSV: ajuste conforme a iluminação e os objetos reais.
 COLOR_RANGES = {
     "Laranja": [((8, 90, 70), (24, 255, 255))],

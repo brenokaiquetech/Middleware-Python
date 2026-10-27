@@ -8,6 +8,7 @@ import time
 from sorting import sorter
 from batch_weights import batch_weights
 from mjpeg import JPEGStreamParser
+from background import BackgroundFilter
 
 from config import (
     CAMERA_URL, FRAME_SIZE, MIN_CONTOUR_AREA, MIN_BOX_WIDTH,
@@ -26,15 +27,29 @@ next_id = 1
 tracks = []
 roi = dict(config.DEFAULT_ROI)
 running = True
+background_filter = BackgroundFilter()
+background_reset_requested = False
+
+
+def request_background_capture():
+    """A thread da câmera troca o fundo no próximo quadro, antes da detecção."""
+    global background_reset_requested, latest_detections
+    with lock:
+        background_reset_requested = True
+        latest_detections = []
 
 
 def detect_objects(frame):
     """Detect colored regions inside the normalized ROI."""
-    global next_id, tracks
+    global next_id, tracks, background_filter, background_reset_requested
 
     height, width = frame.shape[:2]
     with lock:
         current_roi = dict(roi)
+        if background_reset_requested:
+            background_filter = BackgroundFilter()
+            background_reset_requested = False
+            tracks = []  # Preserve next_id para não reutilizar IDs já tratados.
 
     x1 = max(0, int(current_roi["x"] * width))
     y1 = max(0, int(current_roi["y"] * height))
@@ -42,6 +57,10 @@ def detect_objects(frame):
     y2 = min(height, int((current_roi["y"] + current_roi["h"]) * height))
 
     if x2 <= x1 or y2 <= y1:
+        return [], (x1, y1, x2, y2)
+
+    foreground = background_filter.foreground_mask(frame)
+    if foreground is None:
         return [], (x1, y1, x2, y2)
 
     crop = frame[y1:y2, x1:x2]
@@ -73,6 +92,16 @@ def detect_objects(frame):
 
             # Ignore extremely thin noise-like contours.
             if max(bw / max(bh, 1), bh / max(bw, 1)) > 8:
+                continue
+
+            # Preserve o contorno HSV original, mas aceite apenas regiões que
+            # mudaram desde o cenário vazio. Ruído nas bordas não vira peça.
+            contour_mask = np.zeros((bh, bw), dtype=np.uint8)
+            cv2.drawContours(contour_mask, [contour], -1, 255, cv2.FILLED,
+                             offset=(-bx, -by))
+            changed = foreground[y1 + by:y1 + by + bh, x1 + bx:x1 + bx + bw]
+            changed_pixels = cv2.countNonZero(cv2.bitwise_and(changed, contour_mask))
+            if changed_pixels / cv2.countNonZero(contour_mask) < config.BACKGROUND_MIN_CHANGED_RATIO:
                 continue
 
             found.append({
@@ -182,14 +211,18 @@ def camera_frames():
                         )
 
                     with lock:
+                        # Um pedido de recaptura invalida este quadro antes
+                        # de publicar resultados ou interpretar materiais.
+                        if background_reset_requested:
+                            detections = []
                         latest_frame = frame.copy()
                         latest_detections = [
                             {k: v for k, v in d.items()
                              if k not in ("cx", "cy")}
                             for d in detections
                         ]
-                    sorter.observe(detections)
-                    batch_weights.observe(detections)
+                        sorter.observe(detections)
+                        batch_weights.observe(detections)
         except Exception as exc:
             print(f"[câmera] {exc}. Tentando reconectar em {config.CAMERA_RECONNECT_SECONDS} segundos...")
             time.sleep(config.CAMERA_RECONNECT_SECONDS)

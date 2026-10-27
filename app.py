@@ -23,6 +23,7 @@ def detection_snapshot():
     with vision.lock:
         detections = [dict(item) for item in vision.latest_detections]
         connected = vision.latest_frame is not None
+        background_ready = vision.background_filter.ready and not vision.background_reset_requested
     for item in detections:
         target = config.SORT_TARGETS.get(item["color"])
         if target:
@@ -34,6 +35,7 @@ def detection_snapshot():
     motor_state = temperature.snapshot()
     return {
         "connected": connected,
+        "background_ready": background_ready,
         "count": len(detections),
         "counts": counts,
         "detections": detections,
@@ -81,6 +83,12 @@ def api_batch_piece():
     except ValueError as exc:
         return jsonify({"erro": str(exc)}), 400
     return jsonify(result), 200 if result["sucesso"] else 409
+
+
+@app.route("/api/camera/background", methods=["POST"])
+def capture_background():
+    vision.request_background_capture()
+    return jsonify({"ok": True, "background_ready": False}), 202
 
 
 @app.route("/api/roi", methods=["POST"])

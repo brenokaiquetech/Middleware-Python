@@ -19,6 +19,37 @@ com a queda da esteira. A imagem não determina o zero nem o sentido do servo:
 calibre `SORT_TARGETS` em `config.py` na montagem real. Verde e azul continuam
 usando as mesmas faixas HSV anteriores (`Verde-claro` e `Azul-claro`).
 
+## Câmera fixa e captura do fundo
+
+Ao iniciar o Python, mantenha a câmera fixa e a esteira sem carimbinhos por
+`BACKGROUND_WARMUP_SECONDS` (padrão 2 segundos), com pelo menos
+`BACKGROUND_MIN_FRAMES` quadros recebidos (padrão 10). A página
+mostra quando a captura do fundo termina. Nesse período nenhuma detecção
+é enviada para separação ou simulação de peso.
+
+Depois, um contorno de cor só é aceito se a fração definida por
+`BACKGROUND_MIN_CHANGED_RATIO` (padrão 60%) diferir do cenário registrado.
+`BACKGROUND_DIFF_THRESHOLD` controla a sensibilidade à diferença de cor.
+Esses valores ficam em `config.py`. O fundo fica congelado, para que uma
+peça parada enquanto o servo gira continue sendo rastreada. As faixas HSV,
+a ROI e a confirmação de três quadros continuam em uso.
+
+As regiões coloridas vistas durante a captura inicial ficam bloqueadas,
+mesmo se a exposição ou a cor registrada pela câmera mudar. A margem
+`BACKGROUND_IGNORE_MARGIN_PX` (padrão 3 pixels) cobre variações nas bordas.
+Restrinja a ROI à esteira: carimbinhos colocados sobre regiões bloqueadas
+também podem ser ignorados. As regiões permanecem bloqueadas até recapturar
+o fundo.
+
+Se mover a câmera, mudar muito a iluminação ou alterar o cenário, retire os
+carimbinhos e clique em **Registrar fundo novamente**. A rota
+`POST /api/camera/background` solicita uma nova captura no próximo quadro;
+durante a captura os resultados ficam vazios e novos IDs não são reutilizados.
+Também é possível reiniciar o Python com a esteira vazia.
+Uma reconexão do vídeo preserva o fundo. O filtro detecta mudanças e cores;
+outro objeto novo da mesma cor dentro da ROI também pode ser reconhecido.
+Não há classificação do formato dos carimbinhos.
+
 ## Servidor no computador
 
 No terminal, dentro da pasta do projeto:
