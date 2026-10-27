@@ -1,0 +1,300 @@
+# ESP32: separar objetos por cor com servo posicional de 360°
+
+O computador interpreta a câmera e a ESP32 controla a esteira e o prato.
+O ciclo é **identificar → parar a esteira → posicionar o recipiente →
+retomar a esteira até identificar outra peça**. O controle
+implementado é para **servo posicional 0–360°**, conforme informado, não para
+servo de rotação contínua. Os materiais abaixo são uma associação configurada
+por cor; não são identificados fisicamente pela câmera.
+
+| Cor detectada | Recipiente | Material atribuído | Ângulo inicial |
+|---|---|---|---|
+| Laranja | A | Plástico | 0° |
+| Verde-claro | B | Alumínio | 90° |
+| Azul-claro | C | Metal | 180° |
+| Roxo | D | Rejeito | 270° |
+
+Esses ângulos representam posições do eixo que devem alinhar o recipiente
+com a queda da esteira. A imagem não determina o zero nem o sentido do servo:
+calibre `SORT_TARGETS` em `config.py` na montagem real. Verde e azul continuam
+usando as mesmas faixas HSV anteriores (`Verde-claro` e `Azul-claro`).
+
+## Servidor no computador
+
+No terminal, dentro da pasta do projeto:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe app.py
+```
+
+**Edite somente `config.py` para configurar o projeto.** Nele ficam:
+
+- `CAMERA_URL`: vídeo do celular/câmera IP.
+- `SERVER_PUBLIC_HOST`: IPv4 do computador na rede da placa.
+- `HOST` e `PORT`: interface e porta do servidor.
+- `ESP32_WIFI_SSID` e `ESP32_WIFI_PASSWORD`: Wi-Fi da placa.
+- `SERVO_*`: pino, frequência, pulsos, curso e habilitação do servo.
+- `CONVEYOR_*`: habilitação, pinos do L9110S e sentido do motor da esteira.
+- `CONVEYOR_ESTIMATED_SPEED_M_S`: referência visual de velocidade em m/s; não regula o motor.
+- `SORT_*`: recipientes, materiais, ângulos e tempos da separação.
+- `WS_*`, `ESP32_*` e `CAMERA_*`: intervalos e limites de comunicação.
+- `TEMP_*`: temperatura ambiente, teto e velocidades de aquecimento/resfriamento simulados.
+
+Ao iniciar `app.py`, o projeto gera automaticamente
+`esp32/EcoCycleClient/EcoCycleConfig.h`. O firmware inclui esse arquivo, sem
+URLs ou credenciais escritas diretamente no `.ino`. Para gerar sem iniciar
+o servidor:
+
+```powershell
+.\.venv\Scripts\python.exe generate_esp32_config.py
+```
+
+O `.h` é gerado: não o edite manualmente. Mudanças de Wi-Fi, IP/porta/rota ou
+servo/esteira exigem **gerar novamente e regravar a ESP32**. Mudanças somente de câmera,
+visão, associação de recipientes e tempos enviados nos comandos exigem
+reiniciar o servidor. Após editar qualquer configuração da placa, gere o
+arquivo antes de compilar. O servidor não atualiza sozinho uma placa já gravada.
+
+O WebSocket de comandos usa a mesma porta do site:
+`ws://IP_DO_COMPUTADOR:8000/ws/sorter`.
+Use `ipconfig` para consultar o IPv4 do adaptador Wi-Fi/Ethernet conectado
+à rede da ESP32. Não use `localhost`, `0.0.0.0` ou o IP do celular na placa.
+Computador e ESP32 precisam se alcançar pela rede. Caso o Windows bloqueie a
+conexão, permita o Python/porta TCP 8000 na rede privada pelo Firewall.
+
+## Código da placa
+
+1. Na Arduino IDE, selecione sua placa ESP32 e a porta USB.
+2. Instale **WebSockets**, de Markus Sattler (Links2004), **ArduinoJson 7**, de Benoit Blanchon, e **ESP32Servo**.
+3. Abra `EcoCycleClient/EcoCycleClient.ino`.
+4. Preencha `ESP32_WIFI_SSID`, `ESP32_WIFI_PASSWORD` e `SERVER_PUBLIC_HOST` em `config.py` e gere `EcoCycleConfig.h`.
+5. Configure o servo e o L9110S como descrito abaixo antes de acionar os motores.
+6. Envie para a placa e abra o Monitor Serial em **115200 baud**.
+
+### Servo e calibração
+
+Em `config.py` (exportado automaticamente para `EcoCycleConfig.h`):
+
+- `SERVO_PIN`: saída de sinal, inicialmente GPIO 18. Confira sua placa.
+- `SERVO_MIN_US`, `SERVO_MAX_US`, `SERVO_FREQUENCY_HZ`: consulte o datasheet
+  do modelo e calibre. **500–2500 µs e 50 Hz são valores de exemplo**, não uma
+  especificação confirmada do seu servo.
+- `SERVO_TRAVEL_DEG`: 360°, para o servo posicional informado.
+- `SERVO_CALIBRATED`: inicia em `False`; o firmware recebe os comandos mas
+  responde `error` e não conecta o PWM. Configure os limites reais e então
+  mude para `True`, gere o arquivo e regrave a placa para habilitar o acionamento.
+
+A conversão de ângulo para pulso é linear. O firmware usa
+`writeMicroseconds()`: a função `write()` da ESP32Servo limita ângulos a 180°.
+Não use este firmware em um servo contínuo, no qual pulsos controlam velocidade.
+
+Ligue o sinal ao GPIO configurado, o servo a uma fonte compatível com seu
+modelo e una o GND da fonte ao GND da ESP32. A ligação de potência do servo
+não passa pelo GPIO.
+
+### Motor da esteira e L9110S
+
+O firmware controla um canal do L9110S, com o motor TT ligado às saídas desse
+canal. Os valores iniciais no `config.py` são:
+
+| Conexão | Configuração | Valor inicial |
+|---|---|---|
+| Entrada IA do canal do driver | `CONVEYOR_PIN_IA` | GPIO 26 |
+| Entrada IB do mesmo canal | `CONVEYOR_PIN_IB` | GPIO 27 |
+| Sinal do servo | `SERVO_PIN` | GPIO 18 |
+| Sentido do transporte | `CONVEYOR_FORWARD_IA_HIGH` | `True` |
+
+Confirme os GPIOs disponíveis no seu modelo de ESP32 e adapte à fiação real.
+Os três pinos devem ser diferentes. Motor TT é ligado ao driver; não ao GPIO.
+Una o GND da ESP32 ao GND do driver e use alimentação compatível com o motor.
+
+Habilite `CONVEYOR_ENABLED = True` depois de conferir as ligações. Para iniciar
+o transporte, `SERVO_CALIBRATED` também precisa estar em `True`. O firmware
+deixa a esteira parada durante o boot e a conexão Wi-Fi, iniciando depois do
+`hello` do servidor. A direção usa IA alto/IB baixo ou o inverso; a parada usa
+as duas entradas baixas, conforme a [tabela do módulo L9110S](https://docs.sunfounder.com/projects/3in1-kit-r4/en/latest/components/component_l9110s.html).
+Esta versão liga/desliga o motor; não regula a velocidade por PWM.
+
+Ao detectar a desconexão do WebSocket, o firmware para a esteira. Se houver
+um ciclo em andamento, conclui o posicionamento mas só retoma o transporte
+quando a conexão for restabelecida. Um erro de comando também para a esteira.
+
+### Tempo de transporte e espaçamento dos objetos
+
+O comando é criado após `SORT_CONFIRM_FRAMES` quadros consecutivos (padrão 3).
+Ao receber o comando, a ESP32:
+
+1. Para o motor da esteira.
+2. Aguarda `SORT_STOP_MS` (padrão 200 ms), para acomodar a parada mecânica.
+3. Aplica ao servo o ângulo do recipiente correspondente.
+4. Aguarda `SORT_SETTLE_MS` (padrão 800 ms), para posicionamento.
+5. Religa a esteira e responde `done`, com `conveyor_running: true`.
+
+O recipiente permanece nessa posição até a próxima peça. Não há espera
+adicional para a queda nem fila. As etapas usam `millis()`, sem bloquear a
+comunicação com `delay()` durante o ciclo.
+
+Calibre os tempos de parada e posicionamento em `config.py`. Eles são
+estimativas; sem sensores não confirmam parada total ou alinhamento físico.
+A câmera deve identificar a peça antes de ela alcançar a saída. Deixe
+`SORT_ACK_TIMEOUT_SECONDS` maior que a soma dos tempos.
+
+**Mantenha as peças espaçadas.** A peça anterior precisa cair no recipiente
+antes que outra peça provoque uma troca de recipiente. A retomada mantém o
+mesmo ID bloqueado para não parar repetidamente pelo objeto já tratado.
+Durante um ciclo ou sem conexão, não são criados novos comandos. Depois,
+outra peça ainda visível pode ser confirmada nos novos quadros. Se passar
+pela câmera durante a indisponibilidade, não será recuperada por uma fila.
+
+A placa tenta restabelecer o WebSocket a cada 5 segundos após desconectar.
+Não é necessário enviar comando de inscrição. Somente uma ESP32 pode usar
+`/ws/sorter` por vez; monitoramento continua disponível em `/ws/detections`.
+
+## Protocolo de comandos
+
+Ao conectar, o servidor envia `{"type":"hello","session_id":"..."}`.
+Para cada novo ID confirmado, envia uma instrução:
+
+```json
+{
+  "type": "sort_cycle",
+  "session_id": "sessao-do-servidor",
+  "command_id": "identificador-unico",
+  "track_id": 1,
+  "color": "Laranja",
+  "container": "A",
+  "material": "Plástico",
+  "angle_deg": 0,
+  "stop_ms": 200,
+  "settle_ms": 800
+}
+```
+
+A ESP32 responde depois do intervalo completo:
+
+```json
+{"type":"ack","session_id":"sessao-do-servidor","command_id":"identificador-unico","status":"done","conveyor_running":true}
+```
+
+O servidor aguarda essa confirmação para aceitar um novo ciclo.
+Se o servo/esteira estiver desabilitado ou o comando for inválido, a resposta usa
+`status: "error"` e o servidor registra a falha. `done` confirma apenas que
+o ciclo de parar, aplicar o pulso e retomar foi executado: sem sensor externo,
+não comprova o alinhamento físico nem que o objeto caiu.
+
+Reaparições do mesmo ID não geram novas instruções. Se a conexão cair, o
+mesmo comando do ciclo atual pode ser retransmitido dentro do prazo de confirmação;
+o firmware reconhece o comando
+em andamento ou o último concluído sem repetir o movimento. Essa memória
+é perdida se a ESP32 reiniciar. O servo é posicional, portanto os comandos
+sempre expressam um destino absoluto, não um incremento de giro.
+
+Comandos rejeitados, ciclos sem confirmação e objetos ignorados são registrados
+no terminal. O único comando mantido é o do ciclo atual. Se não houver resposta
+em `SORT_ACK_TIMEOUT_SECONDS`, o ciclo é cancelado e a conexão é encerrada.
+Após reiniciar o servidor os IDs/sessão mudam;
+um objeto ainda visível pode gerar novo comando. O rastreamento original
+também pode criar um ID novo após oclusão/perda do objeto.
+
+## Monitoramento das detecções
+
+### Dashboard
+
+Abaixo das detecções, o painel mostra três cartões: temperatura simulada,
+velocidade estimada e porcentagem do peso processado do lote. Embaixo ficam
+os pesos de plástico, alumínio, metal e rejeito no lote atual.
+
+Sem sensor de velocidade, `CONVEYOR_ESTIMATED_SPEED_M_S` define somente a
+referência exibida quando a ESP32 informa motor ligado (padrão 0,10 m/s).
+Parada conhecida mostra 0,00 m/s; sem telemetria mostra “—”. Esse valor não
+é uma medição nem altera o acionamento do motor. O JSON inclui `conveyor`
+com `speed_m_s`, `speed_estimated`, `running` e `state_known`.
+Sem lote cadastrado, a porcentagem e os pesos mostram “—”.
+
+### Temperatura simulada
+
+O painel e o JSON de `/api/detections` e `/ws/detections` incluem `temperature`:
+
+```json
+{"simulated":true,"temperature_c":28.0,"ambient_c":25.0,"conveyor_running":true,"continuous_run_seconds":20.0,"state_known":true}
+```
+
+É um dado fictício calculado no servidor, não uma leitura de sensor:
+
+- Começa em `TEMP_AMBIENT_C` (25 °C).
+- Aumenta `TEMP_HEATING_C_PER_SECOND` (0,15 °C/s) enquanto ligada,
+  limitado a `TEMP_MAX_C` (70 °C).
+- Diminui `TEMP_COOLING_C_PER_SECOND` (0,10 °C/s) quando parada,
+  sem cair abaixo da temperatura ambiente. Não volta à temperatura ambiente
+  instantaneamente ao parar: conserva o calor acumulado.
+- O contador de tempo consecutivo zera ao parar e recomeça ao ligar novamente.
+- O cálculo usa tempo decorrido, independentemente do navegador estar aberto
+  ou de quantas vezes a API é consultada. Reiniciar o Python reinicia a simulação.
+
+O firmware atualizado envia `{"type":"conveyor_state","session_id":"...","running":true}`
+ao ligar/parar e periodicamente a cada `ESP32_TELEMETRY_INTERVAL_MS` (1000 ms).
+O servidor recebe essas mensagens mesmo quando não há objeto sendo separado.
+O estado representa o sinal de acionamento da ESP32, sem sensor de rotação.
+Se desconectar ou não houver atualização por `TEMP_STATE_TIMEOUT_SECONDS`
+(3 s), a simulação assume parada e esfria, com `state_known: false` no painel.
+Para aquecer com a esteira ligada, é necessário regravar o firmware com
+essa telemetria; apenas abrir o site não faz a temperatura subir.
+
+### Dados dos objetos
+
+Cada mensagem é um JSON em texto, enviado imediatamente ao conectar e,
+depois, a cada 500 ms. Esse intervalo pode ser alterado em
+`config.py`, na variável `WS_SEND_INTERVAL`.
+
+```json
+{
+  "connected": true,
+  "count": 1,
+  "counts": {"Laranja": 1, "Verde-claro": 0, "Azul-claro": 0, "Roxo": 0},
+  "detections": [
+    {"id": 1, "color": "Laranja", "x": 120, "y": 150, "w": 40, "h": 40,
+     "area": 1521, "material": "Plástico", "container": "A"}
+  ]
+}
+```
+
+- `connected`: indica que o servidor já recebeu uma imagem da câmera.
+  Mantém a semântica da API HTTP atual: se a câmera cair depois, o último
+  quadro e as últimas detecções podem continuar disponíveis. Não representa
+  uma verificação contínua da conexão da câmera.
+- `count` e `counts`: quantidade atual total e por cor.
+- `detections`: objetos, IDs e caixas em pixels na imagem processada de 640 × 480.
+- `material` e `container`: associação de cor, material e recipiente.
+
+As mensagens são retratos do estado, não eventos de entrada de objetos.
+O mesmo objeto aparece em várias mensagens com o mesmo ID; ao usar motores
+ou atuadores, considere isso para não executar uma ação a cada atualização.
+Os IDs são temporários e reiniciam quando o servidor é reiniciado.
+O WebSocket transmite os dados de detecção; o vídeo continua na rota `/video`.
+
+## Organização
+
+- `app.py`: servidor HTTP e função que fornece os dados às duas conexões.
+- `websocket_server.py`: rota WebSocket e envio periódico.
+- `sorting.py`: confirmação de novos IDs e controle de um único ciclo por vez.
+- `vision.py`: captura e visão computacional, com envio de cada frame processado à separação.
+- `config.py`: todas as opções de instalação, câmera, detecção, servidor, ESP32 e servo.
+- `temperature.py`: simulação de temperatura e tempo consecutivo de acionamento.
+- `generate_esp32_config.py`: exporta as opções da placa em C++.
+- `esp32/EcoCycleClient/EcoCycleConfig.h`: configuração gerada; não editar manualmente.
+
+Referências: [Flask-Sock](https://flask-sock.readthedocs.io/en/latest/quickstart.html),
+[WebSockets para Arduino](https://github.com/Links2004/arduinoWebSockets),
+[ArduinoJson 7](https://arduinojson.org/v7/tutorial/deserialization/).
+Controle de pulsos: [API da ESP32Servo](https://github.com/madhephaestus/ESP32Servo/blob/master/src/ESP32Servo.h).
+
+## Testes sem hardware
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```
+
+Os testes verificam o servidor, não validam o PWM, o giro físico ou os tempos
+da esteira. O sketch precisa ser compilado e carregado para o modelo de ESP32
+escolhido na Arduino IDE.

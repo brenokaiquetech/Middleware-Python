@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EcoCycle | Visão Computacional</title>
+<style>
+:root{--dark:#104a35;--bg:#f3f7f5;--text:#1b3027;--muted:#65776e;--border:#dce7e0;--orange:#dc7b25;--blue:#288ba1;--green:#16865a}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,"Segoe UI",Arial,sans-serif}
+main{max-width:1200px;margin:auto;padding:28px;display:grid;grid-template-columns:220px minmax(0,1fr);gap:22px;align-items:start}
+.panel{background:white;border:1px solid var(--border);border-radius:15px;padding:18px;box-shadow:0 4px 18px #173b2808;min-width:0}
+.panel h2{font-size:17px;margin:0 0 16px}.muted{color:var(--muted);font-size:13px;line-height:1.55}
+.camera{position:relative;aspect-ratio:4/3;background:#17241d;border-radius:13px;overflow:hidden}
+#feed{display:block;width:100%;height:100%;object-fit:contain}
+#roi{position:absolute;left:15%;top:15%;width:70%;height:70%;border:2px solid #00ed88;background:#00ed880d;cursor:move;touch-action:none}
+.handle{position:absolute;width:12px;height:12px;background:#00ed88;border:2px solid #087a4a;border-radius:3px}
+.nw{left:-7px;top:-7px;cursor:nw-resize}.ne{right:-7px;top:-7px;cursor:ne-resize}.sw{left:-7px;bottom:-7px;cursor:sw-resize}.se{right:-7px;bottom:-7px;cursor:se-resize}.n{left:calc(50% - 6px);top:-7px;cursor:n-resize}.s{left:calc(50% - 6px);bottom:-7px;cursor:s-resize}.w{left:-7px;top:calc(50% - 6px);cursor:w-resize}.e{right:-7px;top:calc(50% - 6px);cursor:e-resize}
+.status{padding:12px;background:#e7f5ed;color:var(--dark);border-radius:9px;font-size:13px;margin-top:12px}
+.section-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:20px}.section-heading h2{margin:4px 0 0;font-size:20px;letter-spacing:-.4px}.eyebrow{font-size:10px;font-weight:800;letter-spacing:1.8px;color:var(--green)}.live-badge{background:#e8f5ed;color:var(--dark);padding:7px 10px;border-radius:20px;font-size:10px;white-space:nowrap}.live-badge::before{content:"";display:inline-block;width:6px;height:6px;background:#21a46b;border-radius:50%;margin-right:6px}
+.dashboard{margin-top:18px;padding:22px}.metric-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.metric-card{aspect-ratio:1;min-width:0;border:1px solid var(--border);border-radius:16px;padding:18px;display:flex;flex-direction:column;justify-content:space-between;background:#f8faf9}.metric-card.warm{background:#fff8f1;border-color:#f3dfca}.metric-card.cool{background:#f1f8fb;border-color:#d7e9f0}.metric-card.lot{background:#f0f8f3;border-color:#d5e9dc}.metric-label{font-size:12px;font-weight:700;line-height:1.4}.metric-type{display:block;font-size:10px;font-weight:500;color:var(--muted);margin-top:3px}.metric-reading{display:flex;align-items:baseline;gap:5px;white-space:nowrap}.metric-reading strong{font-size:clamp(26px,3.5vw,48px);line-height:1;font-weight:750;letter-spacing:-2px}.metric-reading span{font-size:14px;color:var(--muted)}.warm .metric-reading strong{color:#ba621c}.cool .metric-reading strong{color:#22758b}.lot .metric-reading strong{color:var(--green)}.metric-note{font-size:11px;color:var(--muted);line-height:1.4;margin:0}.lot-progress{appearance:none;width:100%;height:5px;border:0;background:#dcebe1;border-radius:6px;overflow:hidden;margin-top:8px}.lot-progress::-webkit-progress-bar{background:#dcebe1}.lot-progress::-webkit-progress-value{background:var(--green);border-radius:6px}.lot-progress::-moz-progress-bar{background:var(--green);border-radius:6px}
+.operation-status{margin:14px 0 0;font-size:11px;color:var(--muted);line-height:1.5}.materials-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;padding-top:20px;margin-top:20px;border-top:1px solid var(--border)}.materials-heading h3{font-size:14px;margin:0}.materials-heading span{font-size:10px;color:var(--muted)}.material-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:14px}.material-card{min-width:0;border:1px solid var(--border);border-radius:12px;padding:14px 12px;background:#fff}.material-name{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);font-weight:600}.material-name::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--material-color,#6e8177);flex-shrink:0}.material-card[data-material="PLASTICO"]{--material-color:#e38a37}.material-card[data-material="OUTRO_METAL"]{--material-color:#77b950}.material-card[data-material="METAL"]{--material-color:#49a8c7}.material-card[data-material="REJEITO"]{--material-color:#9c73c9}.material-weight{display:block;font-size:22px;font-weight:750;letter-spacing:-.7px;margin-top:12px;color:var(--dark)}.material-unit{font-size:12px;font-weight:400;letter-spacing:0;margin-left:4px;color:var(--muted)}.batch-summary{font-size:12px;color:var(--muted);line-height:1.6;margin:14px 0 0}.batch-last{font-size:11px;color:var(--muted);line-height:1.5;margin:6px 0 0}
+.list{display:grid;gap:8px;margin-top:12px}.item{border:1px solid var(--border);border-radius:10px;padding:12px;font-size:13px}.item strong{color:var(--dark)}.item small{display:block;color:var(--muted);margin-top:5px}
+.metric-card{position:relative}.metric-reading{position:absolute;left:18px;right:18px;top:50%;transform:translateY(-50%)}
+@media(max-width:900px){main{display:flex;flex-direction:column;padding:12px}.left,.center{width:100%}.camera{aspect-ratio:4/3}}
+@media(max-width:520px){.dashboard{padding:14px}.section-heading{gap:8px;margin-bottom:14px}.section-heading h2{font-size:17px}.live-badge{font-size:9px;padding:6px 8px}.metric-grid{gap:7px}.metric-card{padding:10px;border-radius:12px}.metric-label{font-size:10px}.metric-type{font-size:9px}.metric-reading{gap:3px}.metric-reading strong{font-size:25px;letter-spacing:-1.2px}.metric-reading span{font-size:10px}.metric-note{font-size:9px}.lot-progress{height:3px;margin-top:4px}.material-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.materials-heading span{font-size:9px}.material-weight{font-size:24px}.operation-status{font-size:10px}}
+@media(max-width:520px){.metric-card{position:relative;display:block;min-height:0;overflow:hidden}.metric-label{position:absolute;top:9px;left:9px;right:9px;line-height:1.2}.metric-type{margin-top:2px;font-size:8px}.metric-reading{position:absolute;left:9px;right:6px;top:55%;transform:translateY(-50%)}.metric-note{position:absolute;left:9px;right:6px;bottom:9px;font-size:8px;line-height:1.2}.lot .metric-note{bottom:13px}.lot-progress{position:absolute;left:9px;right:9px;bottom:6px;width:calc(100% - 18px);margin:0}.metric-reading strong{font-size:23px}.metric-reading span{font-size:9px}}
+@media(max-width:360px){.metric-type{display:none}.metric-reading strong{font-size:21px}}
+</style>
+</head>
+<body>
+<main>
+  <section class="left panel">
+    <h2>◉ Conexão da câmera</h2>
+    <p class="muted">Edite a URL no arquivo config.py se precisar trocar a câmera; depois reinicie o servidor.</p>
+    <div class="status" id="status">Iniciando conexão...</div>
+    <p class="muted">Arraste a área verde ou os quadrados para ajustar a região analisada.</p>
+    </section>
+
+  <section class="center">
+    <div class="panel">
+      <h2>Visualização da esteira</h2>
+      <div class="camera" id="camera">
+        <img id="feed" src="/video" alt="Fluxo processado pela visão computacional">
+        <div id="roi">
+          <i class="handle nw" data-handle="nw"></i><i class="handle n" data-handle="n"></i>
+          <i class="handle ne" data-handle="ne"></i><i class="handle w" data-handle="w"></i>
+          <i class="handle e" data-handle="e"></i><i class="handle sw" data-handle="sw"></i>
+          <i class="handle s" data-handle="s"></i><i class="handle se" data-handle="se"></i>
+        </div>
+      </div>
+      <p class="muted">O retângulo verde é a região de interesse (ROI). As caixas de detecção são desenhadas pelo Python no vídeo.</p>
+    </div>
+    <div class="panel" style="margin-top:14px">
+      <h2>Detecções em tempo real</h2>
+      <div id="detections" class="list"><p class="muted">Aguardando os primeiros resultados...</p></div>
+    </div>
+    <section class="panel dashboard" aria-labelledby="dashboardTitle">
+      <div class="section-heading">
+        <div><span class="eyebrow">DASHBOARD</span><h2 id="dashboardTitle">Visão geral da operação</h2></div>
+        <span class="live-badge" id="dashboardStatus">Aguardando dados</span>
+      </div>
+      <div class="metric-grid">
+        <article class="metric-card warm">
+          <div class="metric-label">Temperatura<span class="metric-type">Simulada</span></div>
+          <div class="metric-reading"><strong id="temperature">—</strong><span>°C</span></div>
+          <p class="metric-note">Simulação térmica</p>
+        </article>
+        <article class="metric-card cool">
+          <div class="metric-label">Velocidade da esteira<span class="metric-type">Estimada</span></div>
+          <div class="metric-reading"><strong id="conveyorSpeed">—</strong><span>m/s</span></div>
+          <p class="metric-note" id="conveyorSpeedState">Sem telemetria</p>
+        </article>
+        <article class="metric-card lot">
+          <div class="metric-label">Lote processado<span class="metric-type">Peso simulado</span></div>
+          <div class="metric-reading"><strong id="batchPercent">—</strong><span>%</span></div>
+          <div><p class="metric-note" id="batchCardState">Aguardando lote</p><progress class="lot-progress" id="batchProgressBar" value="0" max="100" aria-label="Porcentagem do lote processado"></progress></div>
+        </article>
+      </div>
+      <p class="operation-status" id="conveyorState">Aguardando estado da ESP32...</p>
+      <div class="materials-heading"><h3>Peso por material</h3><span>Valores simulados · lote atual</span></div>
+      <div class="material-grid" id="batchTotals"></div>
+      <p class="batch-summary" id="batchState">Aguardando lote...</p>
+      <p class="batch-summary" id="batchProgress"></p>
+      <p class="batch-last" id="batchLast"></p>
+    </section>
+  </section>
+
+</main>
+<script>
+const roi = document.querySelector("#roi");
+const camera = document.querySelector("#camera");
+let dragging = null, pointerStart = null, roiStart = null;
+
+function sendROI() {
+  const box = {
+    x: roi.offsetLeft / camera.clientWidth,
+    y: roi.offsetTop / camera.clientHeight,
+    w: roi.offsetWidth / camera.clientWidth,
+    h: roi.offsetHeight / camera.clientHeight
+  };
+  fetch("/api/roi", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(box)
+  }).catch(console.error);
+}
+roi.addEventListener("pointerdown", e => {
+  e.preventDefault(); e.stopPropagation();
+  const h = e.target.closest("[data-handle]");
+  dragging = h ? h.dataset.handle : "move";
+  pointerStart = {x:e.clientX,y:e.clientY};
+  roiStart = {x:roi.offsetLeft,y:roi.offsetTop,w:roi.offsetWidth,h:roi.offsetHeight};
+  roi.setPointerCapture(e.pointerId);
+});
+roi.addEventListener("pointermove", e => {
+  if (!dragging) return;
+  const dx=e.clientX-pointerStart.x, dy=e.clientY-pointerStart.y;
+  let {x,y,w,h}=roiStart;
+  if(dragging==="move"){x+=dx;y+=dy;}
+  else{
+    if(dragging.includes("e"))w+=dx;
+    if(dragging.includes("s"))h+=dy;
+    if(dragging.includes("w")){x+=dx;w-=dx;}
+    if(dragging.includes("n")){y+=dy;h-=dy;}
+  }
+  w=Math.max(40,Math.min(w,camera.clientWidth)); h=Math.max(40,Math.min(h,camera.clientHeight));
+  x=Math.max(0,Math.min(x,camera.clientWidth-w)); y=Math.max(0,Math.min(y,camera.clientHeight-h));
+  Object.assign(roi.style,{left:x+"px",top:y+"px",width:w+"px",height:h+"px"});
+});
+function endDrag(){if(dragging){dragging=null;pointerStart=null;roiStart=null;sendROI();}}
+roi.addEventListener("pointerup",endDrag); roi.addEventListener("pointercancel",endDrag);
+
+function safeEl(tag, text, className=""){const el=document.createElement(tag);el.textContent=text;if(className)el.className=className;return el;}
+async function refresh(){
+  try{
+    const res=await fetch("/api/detections",{cache:"no-store"});
+    const data=await res.json();
+    document.querySelector("#status").textContent=data.connected?"Câmera conectada · processamento Python ativo":"Aguardando câmera; confira a URL no config.py.";
+    const temp=data.temperature;
+    document.querySelector("#dashboardStatus").textContent="Atualização em tempo real";
+    document.querySelector("#temperature").textContent=temp.temperature_c.toLocaleString("pt-BR",{minimumFractionDigits:1,maximumFractionDigits:1});
+    const conveyor=data.conveyor;
+    document.querySelector("#conveyorSpeed").textContent=conveyor.speed_m_s===null?"—":conveyor.speed_m_s.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});
+    document.querySelector("#conveyorSpeedState").textContent=!conveyor.state_known?"Sem telemetria":conveyor.running?"Em movimento":"Esteira parada";
+    document.querySelector("#conveyorState").textContent=!temp.state_known
+      ? "Sem estado recente da ESP32 · simulação em resfriamento."
+      : temp.conveyor_running
+        ? `Esteira ligada há ${Math.floor(temp.continuous_run_seconds)} s consecutivos.`
+        : "Esteira parada · simulação em resfriamento.";
+    const batch=data.batch;
+    const percent=batch.pesoTotalLoteGramas>0?Math.min(100,Math.max(0,batch.pesoProcessadoGramas/batch.pesoTotalLoteGramas*100)):null;
+    document.querySelector("#batchPercent").textContent=percent===null?"—":percent.toLocaleString("pt-BR",{maximumFractionDigits:1});
+    document.querySelector("#batchProgressBar").value=percent===null?0:percent;
+    document.querySelector("#batchCardState").textContent=percent===null?"Aguardando lote":batch.statusLote==="CONCLUIDO"?"Concluído":"Em processamento";
+    document.querySelector("#batchState").textContent=batch.loteId===null
+      ? "Aguardando lote para iniciar a simulação."
+      : `Lote ${batch.loteId} · ${batch.statusLote==="CONCLUIDO"?"Concluído":"Em processamento"}`;
+    document.querySelector("#batchProgress").textContent=batch.loteId===null?""
+      : `${batch.pesoProcessadoGramas.toLocaleString("pt-BR")} g de ${batch.pesoTotalLoteGramas.toLocaleString("pt-BR")} g · Saldo: ${batch.saldoLoteGramas.toLocaleString("pt-BR")} g`;
+    const totals=document.querySelector("#batchTotals");totals.replaceChildren();
+    const materialOrder=["PLASTICO","OUTRO_METAL","METAL","REJEITO"];
+    for(const material of materialOrder){
+      const card=safeEl("div","","material-card");card.dataset.material=material;
+      card.append(safeEl("span",batch.nomesMateriais[material]||material,"material-name"));
+      const weight=safeEl("strong",batch.loteId===null?"—":(batch.totaisPorMaterial[material]||0).toLocaleString("pt-BR"),"material-weight");
+      weight.append(safeEl("span","g","material-unit"));card.append(weight);totals.append(card);
+    }
+    const last=batch.ultimaPeca;
+    document.querySelector("#batchLast").textContent=last
+      ? `Última peça: ${last.pesoSimuladoGramas} g · ${last.tipoCalculo==="AJUSTE_SALDO"?"Peso ajustado ao saldo final":"Peso aleatório simulado"}.`
+      : "";
+    const list=document.querySelector("#detections");list.replaceChildren();
+    if(!data.detections.length)list.append(safeEl("p","Nenhum objeto das cores permitidas detectado.","muted"));
+    for(const d of data.detections){
+      const card=safeEl("div","", "item");
+      card.append(safeEl("strong",`ID ${d.id} — ${d.color}`));
+      card.append(safeEl("small",`Área aproximada: ${d.area} px · ${d.material}`));
+      list.append(card);
+    }
+  }catch(e){document.querySelector("#status").textContent="Não foi possível acessar o servidor Python.";document.querySelector("#dashboardStatus").textContent="Sem comunicação";document.querySelector("#temperature").textContent="—";document.querySelector("#conveyorSpeed").textContent="—";document.querySelector("#conveyorSpeedState").textContent="Sem telemetria";document.querySelector("#batchPercent").textContent="—";document.querySelector("#batchCardState").textContent="Sem comunicação";document.querySelector("#batchProgressBar").value=0;document.querySelector("#conveyorState").textContent="Sem comunicação com o servidor.";document.querySelector("#batchState").textContent="Sem comunicação; os pesos exibidos podem estar desatualizados.";console.error(e);}
+  setTimeout(refresh,500);
+}
+window.addEventListener("load",()=>{setTimeout(sendROI,100);refresh();});
+</script>
+</body>
+</html>
