@@ -24,7 +24,7 @@ SERVO_PIN = 18
 SERVO_FREQUENCY_HZ = 50
 SERVO_MIN_US = 500  # Exemplo; confirme o pulso mínimo do modelo.
 SERVO_MAX_US = 2500  # Exemplo; confirme o pulso máximo do modelo.
-SERVO_TRAVEL_DEG = 180.0
+SERVO_TRAVEL_DEG = 360.0  # Servo POSICIONAL 0–360°.
 SERVO_TEST_STEP_MS = 2000  # Intervalo do sketch de diagnóstico do servo.
 
 # ESTEIRA / L9110S: entradas IA e IB de um mesmo canal do driver.
@@ -34,6 +34,8 @@ CONVEYOR_PIN_IA = 26
 CONVEYOR_PIN_IB = 25  # Ligue fisicamente IB do mesmo canal do L9110S a este GPIO.
 CONVEYOR_FORWARD_IA_HIGH = True  # False inverte o sentido de transporte.
 CONVEYOR_ESTIMATED_SPEED_M_S = 0.10  # Referência visual enquanto ligada; não é medida por sensor.
+SERVO_SIMULATED_FORCE_PER_KG_N = 2.0  # Modelo fictício: força equivalente por kg do lote.
+CONVEYOR_SIMULATED_FORCE_REFERENCE_N = 2.0  # Nesta força, a velocidade simulada cai à metade.
 ESP32_SERIAL_BAUD = 115200
 ESP32_RECONNECT_MS = 5000
 ESP32_WIFI_WAIT_MS = 500
@@ -46,6 +48,8 @@ TEMP_MAX_C = 70.0
 TEMP_HEATING_C_PER_SECOND = 0.15
 TEMP_COOLING_C_PER_SECOND = 0.10
 TEMP_STATE_TIMEOUT_SECONDS = 3.0  # Sem telemetria, considerar parada na simulação.
+TEMP_CRITICAL_C = 60.0  # Temperatura simulada que bloqueia a esteira.
+TEMP_RELEASE_C = 50.0  # Liberação manual permitida somente nesta temperatura ou abaixo.
 
 # PESO SIMULADO POR LOTE: faixas ilustrativas do documento, em gramas inteiras.
 BATCH_WEIGHT_RANGES_G = {
@@ -81,13 +85,14 @@ SORT_POLL_INTERVAL_SECONDS = 0.01  # Espera máxima entre consultas do comando a
 SORT_STOP_MS = 200  # Intervalo entre mandar parar e movimentar o prato.
 SORT_SETTLE_MS = 1500  # Aguarde o posicionamento; ajuste com a carga real.
 
-# Ângulos do SERVO que alinham cada recipiente com a saída da esteira.
-# Calibre o sentido e o zero com o prato montado.
+# EDITE angle_deg DE CADA COR para alinhar os recipientes com a saída.
+# Aceita valores decimais de 0 até SERVO_TRAVEL_DEG (360° atualmente).
+# Os ângulos são enviados pelo servidor; reinicie o Python após alterá-los.
 SORT_TARGETS = {
     "Laranja": {"container": "A", "material": "Plástico", "angle_deg": 0},
-    "Verde-claro": {"container": "B", "material": "Alumínio", "angle_deg": 60},
-    "Azul-claro": {"container": "C", "material": "Metal", "angle_deg": 120},
-    "Roxo": {"container": "D", "material": "Rejeito", "angle_deg": 180},
+    "Verde-claro": {"container": "B", "material": "Alumínio", "angle_deg": 90},
+    "Azul-claro": {"container": "C", "material": "Metal", "angle_deg": 180},
+    "Roxo": {"container": "D", "material": "Rejeito", "angle_deg": 270},
 }
 
 # CÂMERA / VISÃO: parâmetros mantidos do processamento original.

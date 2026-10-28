@@ -9,7 +9,7 @@ void receive(const std::string& text) {
                   reinterpret_cast<uint8_t*>(const_cast<char*>(text.data())), text.size());
 }
 
-void hello() { receive(R"({"type":"hello","session_id":"test"})"); }
+void hello() { receive(R"({"type":"hello","session_id":"test","thermal_blocked":false})"); }
 
 void cycle(const char* id, float angle = 90) {
   JsonDocument message;
@@ -79,6 +79,16 @@ int main() {
   assertAck("first", "done");
   std::cout << "PASS: comando repetido nao para a esteira nem move o servo\n";
 
+  cycle("upper-half", SERVO_TRAVEL_DEG * .75f);
+  advance(200);
+  assertMotor(false);
+  assert(plateServo.pulses.back() > static_cast<int>((SERVO_MIN_US + SERVO_MAX_US) / 2));
+  assert(plateServo.pulses.back() < static_cast<int>(SERVO_MAX_US));
+  advance(1500);
+  assertMotor(true);
+  assertAck("upper-half", "done");
+  std::cout << "PASS: posicao de 270 graus usa a metade superior do curso de 360\n";
+
   cycle("invalid", SERVO_TRAVEL_DEG + 90);
   assertMotor(true);
   assert(phase == IDLE);
@@ -129,4 +139,33 @@ int main() {
   assertMotor(true);
   assertAck("wrap", "done");
   std::cout << "PASS: temporizacao funciona no estouro do millis\n";
+
+  receive(R"({"type":"thermal_control","session_id":"test","blocked":true})");
+  assertMotor(false);
+  advance(10000);
+  assertMotor(false);  // O estado IDLE nao contorna o bloqueio termico.
+  cycle("hot");
+  assertAck("hot", "error");
+  assertMotor(false);
+  receive(R"({"type":"hello","session_id":"test","thermal_blocked":true})");
+  assertMotor(false);
+  hello();  // Mesmo um novo servidor frio nao libera o bloqueio local.
+  assertMotor(false);
+  receive(R"({"type":"thermal_control","session_id":"wrong","blocked":false})");
+  assertMotor(false);
+  receive(R"({"type":"thermal_control","session_id":"test","blocked":false})");
+  assertMotor(true);
+  std::cout << "PASS: bloqueio termico persiste ate liberacao explicita da sessao\n";
+
+  cycle("heat-in-cycle");
+  receive(R"({"type":"thermal_control","session_id":"test","blocked":true})");
+  advance(200);
+  advance(1500);
+  assertAck("heat-in-cycle", "done");
+  assertMotor(false);
+  advance(10000);
+  assertMotor(false);
+  receive(R"({"type":"thermal_control","session_id":"test","blocked":false})");
+  assertMotor(true);
+  std::cout << "PASS: fim do ciclo nao religa durante bloqueio termico\n";
 }

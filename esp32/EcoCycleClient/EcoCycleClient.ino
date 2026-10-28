@@ -18,6 +18,8 @@ CyclePhase phase = IDLE;
 bool serverReady = false;
 bool conveyorRunning = false;
 bool servoReady = false;
+bool thermalBlocked = true;  // Aguarde o estado térmico enviado pelo servidor.
+bool thermalStateKnown = false;
 uint32_t phaseStarted = 0;
 uint32_t stopDuration = 0;
 uint32_t settleDuration = 0;
@@ -34,6 +36,7 @@ void reportConveyorState() {
   message["type"] = "conveyor_state";
   message["session_id"] = serverSession;
   message["running"] = conveyorRunning;
+  message["thermal_blocked"] = thermalBlocked;
   String text;
   serializeJson(message, text);
   webSocket.sendTXT(text);
@@ -51,7 +54,7 @@ void stopConveyor() {
 }
 
 void startConveyor() {
-  if (conveyorRunning || !hardwareReady() || !serverReady || phase != IDLE) return;
+  if (conveyorRunning || !hardwareReady() || !serverReady || thermalBlocked || phase != IDLE) return;
   digitalWrite(CONVEYOR_PIN_IA, CONVEYOR_FORWARD_IA_HIGH ? HIGH : LOW);
   digitalWrite(CONVEYOR_PIN_IB, CONVEYOR_FORWARD_IA_HIGH ? LOW : HIGH);
   conveyorRunning = true;
@@ -66,6 +69,7 @@ void acknowledge(const String& session, const String& command, const char* statu
   ack["command_id"] = command;
   ack["status"] = status;
   ack["conveyor_running"] = conveyorRunning;
+  ack["thermal_blocked"] = thermalBlocked;
   String text;
   serializeJson(ack, text);
   webSocket.sendTXT(text);
@@ -90,6 +94,7 @@ void startSortCycle(JsonDocument& doc) {
   else if (!servoReady) reason = "PWM do servo nao inicializado";
   else if (!CONVEYOR_ENABLED) reason = "esteira desabilitada";
   else if (!serverReady) reason = "servidor indisponivel";
+  else if (thermalBlocked) reason = "bloqueio por temperatura critica";
   else if (phase != IDLE) reason = "ciclo em andamento";
   else if (doc["angle_deg"].isNull() || !isfinite(angle)
            || angle < 0 || angle > SERVO_TRAVEL_DEG) reason = "angulo fora do curso do servo";
@@ -103,7 +108,8 @@ void startSortCycle(JsonDocument& doc) {
     return;
   }
 
-  // write(270) seria limitado a 180 pela ESP32Servo. Use pulsos calibrados.
+  // Curso configurável (360° atualmente): write() limita ângulos a 180°.
+  // Converta o ângulo recebido em pulso calibrado e use writeMicroseconds().
   targetPulseUs = lroundf(SERVO_MIN_US +
                          (angle / SERVO_TRAVEL_DEG) * (SERVO_MAX_US - SERVO_MIN_US));
   activeCommand = command;
@@ -142,7 +148,24 @@ void onWebSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
       if (strcmp(messageType, "hello") == 0) {
         serverSession = doc["session_id"] | "";
         serverReady = !serverSession.isEmpty();
+        bool serverBlocked = !doc["thermal_blocked"].is<bool>() || doc["thermal_blocked"].as<bool>();
+        // Um hello de reconexao nao substitui a liberacao manual explicita.
+        thermalBlocked = thermalStateKnown ? thermalBlocked || serverBlocked : serverBlocked;
+        thermalStateKnown = true;
+        if (thermalBlocked) stopConveyor();
         startConveyor();
+        reportConveyorState();
+      } else if (strcmp(messageType, "thermal_control") == 0) {
+        String session = doc["session_id"] | "";
+        if (!serverReady || session != serverSession || !doc["blocked"].is<bool>()) return;
+        thermalBlocked = doc["blocked"].as<bool>();
+        if (thermalBlocked) {
+          stopConveyor();
+          Serial.println("Parada termica: aguarde resfriamento e liberacao manual no painel.");
+        } else {
+          startConveyor();
+          Serial.println("Bloqueio termico liberado pelo operador.");
+        }
         reportConveyorState();
       } else if (strcmp(messageType, "sort_cycle") == 0) {
         startSortCycle(doc);
@@ -169,9 +192,9 @@ void setup() {
     plateServo.setPeriodHertz(SERVO_FREQUENCY_HZ);
     plateServo.attach(SERVO_PIN, SERVO_MIN_US, SERVO_MAX_US);
     servoReady = plateServo.attached();
-    Serial.printf("Servo GPIO %lu: PWM %s | %lu Hz | %lu a %lu us\n",
+    Serial.printf("Servo GPIO %lu: PWM %s | curso %.1f graus | %lu Hz | %lu a %lu us\n",
                   SERVO_PIN, servoReady ? "ativo" : "FALHOU",
-                  SERVO_FREQUENCY_HZ, SERVO_MIN_US, SERVO_MAX_US);
+                  SERVO_TRAVEL_DEG, SERVO_FREQUENCY_HZ, SERVO_MIN_US, SERVO_MAX_US);
   } else {
     Serial.println("Servo desabilitado: calibre em config.py, gere a configuracao e reenvie o firmware.");
   }
@@ -210,7 +233,9 @@ void loop() {
     // Se estiver offline, mantem a esteira parada. Na reconexao, hello
     // retoma a esteira e a repeticao do comando recebe ack sem novo movimento.
     if (serverReady) acknowledge(completedSession, completedCommand, "done");
-    Serial.println(conveyorRunning ? "Recipiente pronto. Esteira retomada." : "Recipiente pronto. Aguardando conexao.");
+    Serial.println(thermalBlocked ? "Recipiente pronto. Esteira bloqueada por temperatura."
+                   : conveyorRunning ? "Recipiente pronto. Esteira retomada."
+                   : "Recipiente pronto. Aguardando conexao.");
   }
   // O estado livre mantem a esteira ligada, mesmo sem imagens/deteccoes e
   // depois de uma rejeicao. startConveyor so escreve os pinos ao mudar de estado.

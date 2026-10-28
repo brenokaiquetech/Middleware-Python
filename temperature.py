@@ -1,6 +1,7 @@
 """Temperatura fictícia calculada pelo tempo no estado ligado/desligado."""
 import threading
 import time
+import math
 
 import config
 
@@ -13,8 +14,14 @@ class TemperatureSimulation:
         self.heating = config.TEMP_HEATING_C_PER_SECOND
         self.cooling = config.TEMP_COOLING_C_PER_SECOND
         self.timeout = config.TEMP_STATE_TIMEOUT_SECONDS
+        self.critical = config.TEMP_CRITICAL_C
+        self.release_limit = config.TEMP_RELEASE_C
         if (self.maximum < self.ambient or self.heating < 0 or self.cooling < 0
-                or self.timeout <= 0):
+                or self.timeout <= 0
+                or not all(math.isfinite(value) for value in (
+                    self.maximum, self.ambient, self.heating, self.cooling,
+                    self.timeout, self.critical, self.release_limit))
+                or not self.ambient <= self.release_limit < self.critical <= self.maximum):
             raise ValueError('Configuração de temperatura simulada inválida.')
         self.lock = threading.Lock()
         self.value = self.ambient
@@ -22,10 +29,15 @@ class TemperatureSimulation:
         self.last_report = None
         self.running = False
         self.running_since = None
+        self.thermal_blocked = False
+        self.last_thermal_report = None
+        self.awaiting_device_interlock = True
 
     def _integrate(self, seconds):
         rate = self.heating if self.running else -self.cooling
         self.value = min(self.maximum, max(self.ambient, self.value + rate * seconds))
+        if self.value >= self.critical:
+            self.thermal_blocked = True
 
     def _advance(self, now):
         # Integre até o último estado válido; depois esfrie se a telemetria sumir.
@@ -39,7 +51,7 @@ class TemperatureSimulation:
         self._integrate(max(0, now - self.updated_at))
         self.updated_at = now
 
-    def report(self, running):
+    def report(self, running, thermal_blocked=None):
         if not isinstance(running, bool):
             raise ValueError('O estado da esteira deve ser booleano.')
         with self.lock:
@@ -51,6 +63,11 @@ class TemperatureSimulation:
                 self.running_since = None
             self.running = running
             self.last_report = now
+            if isinstance(thermal_blocked, bool):
+                if self.awaiting_device_interlock and thermal_blocked:
+                    self.thermal_blocked = True
+                self.awaiting_device_interlock = False
+                self.last_thermal_report = thermal_blocked
 
     def disconnect(self):
         with self.lock:
@@ -58,6 +75,23 @@ class TemperatureSimulation:
             self.running = False
             self.running_since = None
             self.last_report = None
+            self.last_thermal_report = None
+            self.awaiting_device_interlock = True
+
+    def release_thermal_block(self):
+        """Liberação humana após esfriar; o resfriamento sozinho não religa."""
+        with self.lock:
+            now = self.clock()
+            self._advance(now)
+            if not self.thermal_blocked:
+                return
+            if self.value > self.release_limit:
+                raise ValueError(f'Aguarde a temperatura chegar a {self.release_limit:g} °C ou menos.')
+            if self.last_report is None or now - self.last_report > self.timeout:
+                raise ValueError('Aguarde a comunicação recente com a ESP32 para liberar.')
+            if self.running or self.last_thermal_report is not True:
+                raise ValueError('Aguarde a confirmação da parada térmica pela ESP32.')
+            self.thermal_blocked = False
 
     def snapshot(self):
         with self.lock:
@@ -67,6 +101,14 @@ class TemperatureSimulation:
                 'simulated': True,
                 'temperature_c': round(self.value, 2),
                 'ambient_c': self.ambient,
+                'critical_c': self.critical,
+                'release_c': self.release_limit,
+                'thermal_blocked': self.thermal_blocked,
+                'thermal_block_confirmed': self.last_thermal_report is True
+                and self.last_report is not None and now - self.last_report <= self.timeout,
+                'can_release': self.thermal_blocked and self.value <= self.release_limit
+                and not self.running and self.last_thermal_report is True
+                and self.last_report is not None and now - self.last_report <= self.timeout,
                 'conveyor_running': self.running,
                 'continuous_run_seconds': round(now - self.running_since, 1)
                 if self.running_since is not None else 0.0,

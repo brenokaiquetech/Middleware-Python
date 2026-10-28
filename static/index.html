@@ -18,6 +18,7 @@ main{max-width:1200px;margin:auto;padding:28px;display:grid;grid-template-column
 .nw{left:-7px;top:-7px;cursor:nw-resize}.ne{right:-7px;top:-7px;cursor:ne-resize}.sw{left:-7px;bottom:-7px;cursor:sw-resize}.se{right:-7px;bottom:-7px;cursor:se-resize}.n{left:calc(50% - 6px);top:-7px;cursor:n-resize}.s{left:calc(50% - 6px);bottom:-7px;cursor:s-resize}.w{left:-7px;top:calc(50% - 6px);cursor:w-resize}.e{right:-7px;top:calc(50% - 6px);cursor:e-resize}
 .status{padding:12px;background:#e7f5ed;color:var(--dark);border-radius:9px;font-size:13px;margin-top:12px}
 .background-button{width:100%;padding:10px 12px;border:1px solid var(--green);border-radius:8px;background:white;color:var(--dark);font:inherit;font-size:13px;cursor:pointer}.background-button:disabled{opacity:.5;cursor:default}
+.thermal-controls{background:#fff0e9;border:1px solid #e7ae91;color:#923d1f;margin-top:14px}.thermal-controls p{margin:0 0 10px;font-size:12px;line-height:1.5}.thermal-controls[hidden]{display:none}.metric-card.warm.critical{border-color:#c55932;background:#fff0e9}
 .section-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:20px}.section-heading h2{margin:4px 0 0;font-size:20px;letter-spacing:-.4px}.eyebrow{font-size:10px;font-weight:800;letter-spacing:1.8px;color:var(--green)}.live-badge{background:#e8f5ed;color:var(--dark);padding:7px 10px;border-radius:20px;font-size:10px;white-space:nowrap}.live-badge::before{content:"";display:inline-block;width:6px;height:6px;background:#21a46b;border-radius:50%;margin-right:6px}
 .dashboard{margin-top:18px;padding:22px}.metric-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.metric-card{aspect-ratio:1;min-width:0;border:1px solid var(--border);border-radius:16px;padding:18px;display:flex;flex-direction:column;justify-content:space-between;background:#f8faf9}.metric-card.warm{background:#fff8f1;border-color:#f3dfca}.metric-card.cool{background:#f1f8fb;border-color:#d7e9f0}.metric-card.lot{background:#f0f8f3;border-color:#d5e9dc}.metric-label{font-size:12px;font-weight:700;line-height:1.4}.metric-type{display:block;font-size:10px;font-weight:500;color:var(--muted);margin-top:3px}.metric-reading{display:flex;align-items:baseline;gap:5px;white-space:nowrap}.metric-reading strong{font-size:clamp(26px,3.5vw,48px);line-height:1;font-weight:750;letter-spacing:-2px}.metric-reading span{font-size:14px;color:var(--muted)}.warm .metric-reading strong{color:#ba621c}.cool .metric-reading strong{color:#22758b}.lot .metric-reading strong{color:var(--green)}.metric-note{font-size:11px;color:var(--muted);line-height:1.4;margin:0}.lot-progress{appearance:none;width:100%;height:5px;border:0;background:#dcebe1;border-radius:6px;overflow:hidden;margin-top:8px}.lot-progress::-webkit-progress-bar{background:#dcebe1}.lot-progress::-webkit-progress-value{background:var(--green);border-radius:6px}.lot-progress::-moz-progress-bar{background:var(--green);border-radius:6px}
 .operation-status{margin:14px 0 0;font-size:11px;color:var(--muted);line-height:1.5}.materials-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;padding-top:20px;margin-top:20px;border-top:1px solid var(--border)}.materials-heading h3{font-size:14px;margin:0}.materials-heading span{font-size:10px;color:var(--muted)}.material-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:14px}.material-card{min-width:0;border:1px solid var(--border);border-radius:12px;padding:14px 12px;background:#fff}.material-name{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);font-weight:600}.material-name::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--material-color,#6e8177);flex-shrink:0}.material-card[data-material="PLASTICO"]{--material-color:#e38a37}.material-card[data-material="OUTRO_METAL"]{--material-color:#77b950}.material-card[data-material="METAL"]{--material-color:#49a8c7}.material-card[data-material="REJEITO"]{--material-color:#9c73c9}.material-weight{display:block;font-size:22px;font-weight:750;letter-spacing:-.7px;margin-top:12px;color:var(--dark)}.material-unit{font-size:12px;font-weight:400;letter-spacing:0;margin-left:4px;color:var(--muted)}.batch-summary{font-size:12px;color:var(--muted);line-height:1.6;margin:14px 0 0}.batch-last{font-size:11px;color:var(--muted);line-height:1.5;margin:6px 0 0}
@@ -71,7 +72,7 @@ main{max-width:1200px;margin:auto;padding:28px;display:grid;grid-template-column
           <p class="metric-note">Simulação térmica</p>
         </article>
         <article class="metric-card cool">
-          <div class="metric-label">Velocidade da esteira<span class="metric-type">Estimada</span></div>
+          <div class="metric-label">Velocidade da esteira<span class="metric-type">Simulada</span></div>
           <div class="metric-reading"><strong id="conveyorSpeed">—</strong><span>m/s</span></div>
           <p class="metric-note" id="conveyorSpeedState">Sem telemetria</p>
         </article>
@@ -82,6 +83,11 @@ main{max-width:1200px;margin:auto;padding:28px;display:grid;grid-template-column
         </article>
       </div>
       <p class="operation-status" id="conveyorState">Aguardando estado da ESP32...</p>
+      <div class="status thermal-controls" id="thermalControls" hidden>
+        <p id="thermalStatus" role="status"></p>
+        <button type="button" class="background-button" id="releaseThermal" disabled>Liberar esteira após resfriamento</button>
+        <p id="thermalError" role="alert"></p>
+      </div>
       <div class="materials-heading"><h3>Peso por material</h3><span>Valores simulados · lote atual</span></div>
       <div class="material-grid" id="batchTotals"></div>
       <p class="batch-summary" id="batchState">Aguardando lote...</p>
@@ -97,6 +103,24 @@ const camera = document.querySelector("#camera");
 let dragging = null, pointerStart = null, roiStart = null;
 let backgroundRequestPending = false;
 let backgroundCaptureRequested = false;
+let thermalRequestPending = false;
+const releaseThermalButton = document.querySelector("#releaseThermal");
+releaseThermalButton.addEventListener("click", async () => {
+  thermalRequestPending = true;
+  releaseThermalButton.disabled = true;
+  const error = document.querySelector("#thermalError");
+  error.textContent = "";
+  try {
+    const response = await fetch("/api/conveyor/thermal/reset", {method:"POST"});
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Não foi possível liberar a esteira.");
+  } catch (failure) {
+    error.textContent = failure.message;
+  } finally {
+    thermalRequestPending = false;
+    refresh();
+  }
+});
 const backgroundButton = document.querySelector("#captureBackground");
 backgroundButton.addEventListener("click", async () => {
   backgroundRequestPending = true;
@@ -170,11 +194,19 @@ async function refresh(){
         ? "Registrando fundo · mantenha a esteira sem carimbinhos."
         : "Câmera pronta · aguardando novos carimbinhos na área verde.";
     const temp=data.temperature;
+    document.querySelector(".metric-card.warm").classList.toggle("critical",temp.thermal_blocked);
+    document.querySelector("#thermalControls").hidden=!temp.thermal_blocked;
+    releaseThermalButton.disabled=thermalRequestPending || !temp.can_release;
+    document.querySelector("#thermalStatus").textContent=!temp.thermal_block_confirmed
+      ? "Parada térmica solicitada · aguardando confirmação da ESP32."
+      : temp.can_release
+        ? "Temperatura reduzida. A esteira continua bloqueada até você liberar."
+        : `Bloqueio por temperatura crítica (${temp.critical_c} °C). Aguarde esfriar até ${temp.release_c} °C para liberar.`;
     document.querySelector("#dashboardStatus").textContent="Atualização em tempo real";
     document.querySelector("#temperature").textContent=temp.temperature_c.toLocaleString("pt-BR",{minimumFractionDigits:1,maximumFractionDigits:1});
     const conveyor=data.conveyor;
     document.querySelector("#conveyorSpeed").textContent=conveyor.speed_m_s===null?"—":conveyor.speed_m_s.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});
-    document.querySelector("#conveyorSpeedState").textContent=!conveyor.state_known?"Sem telemetria":conveyor.running?"Em movimento":"Esteira parada";
+    document.querySelector("#conveyorSpeedState").textContent=!conveyor.state_known?"Sem telemetria":conveyor.running?`Força simulada: ${conveyor.servo_force_n.toLocaleString("pt-BR",{maximumFractionDigits:2})} N`:temp.thermal_blocked?"Parada térmica":"Esteira parada";
     document.querySelector("#conveyorState").textContent=!temp.state_known
       ? "Sem estado recente da ESP32 · simulação em resfriamento."
       : temp.conveyor_running

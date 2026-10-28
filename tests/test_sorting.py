@@ -92,6 +92,28 @@ class SortingTests(unittest.TestCase):
         self.sorter.cancel_command(command['command_id'])
         self.assertIsNone(self.sorter.current_command())
 
+    def test_custom_color_angle_is_sent_unchanged(self):
+        targets = {'Roxo': {'container': 'D', 'material': 'Rejeito', 'angle_deg': 312.5}}
+        sorter = SortingController(targets=targets)
+        sorter.acquire_consumer()
+        confirm(sorter, track_id=123, color='Roxo')
+        command = sorter.current_command()
+        self.assertEqual(command['angle_deg'], 312.5)
+        self.assertEqual(command['container'], 'D')
+        self.assertEqual(command['material'], 'Rejeito')
+
+    def test_thermal_pause_requires_new_confirmation_after_release(self):
+        self.sorter.set_thermal_blocked(True)
+        confirm(self.sorter, 42)
+        self.assertIsNone(self.sorter.current_command())
+        self.sorter.set_thermal_blocked(False)
+        self.assertIsNone(self.sorter.current_command())
+        confirm(self.sorter, 42)
+        command = self.sorter.current_command()
+        self.sorter.cancel_command(command['command_id'], allow_retry=True)
+        confirm(self.sorter, 42)
+        self.assertEqual(self.sorter.current_command()['track_id'], 42)
+
 
 class SortingSocketTests(unittest.TestCase):
     def setUp(self):
@@ -186,6 +208,54 @@ class SortingSocketTests(unittest.TestCase):
         self.assertEqual(self.receive(first)['type'], 'hello')
         second = self.connect()
         self.assertEqual(self.receive(second)['reason'], 'sorter_already_connected')
+
+    def test_overheat_stops_without_browser_and_only_manual_release_resumes(self):
+        self.thermal_now = 0.0
+        self.temperature.clock = lambda: self.thermal_now
+        self.temperature.updated_at = 0.0
+        self.temperature.critical = 25.2
+        self.temperature.release_limit = 25.05
+        client = self.connect()
+        hello = self.receive(client)
+        self.assertFalse(hello['thermal_blocked'])
+        client.send(json.dumps({'type': 'conveyor_state', 'session_id': hello['session_id'],
+                                'running': True, 'thermal_blocked': False}))
+        self.wait_for_temperature(True)
+        self.thermal_now = 2.0
+        control = self.receive(client)
+        self.assertEqual(control['type'], 'thermal_control')
+        self.assertTrue(control['blocked'])
+        confirm(self.sorter, 42)
+        self.assertIsNone(self.sorter.current_command())
+        with self.assertRaises(ValueError):
+            self.temperature.release_thermal_block()
+        client.send(json.dumps({'type': 'conveyor_state', 'session_id': hello['session_id'],
+                                'running': False, 'thermal_blocked': True}))
+        self.wait_for_temperature(False)
+        self.thermal_now = 20.0
+        client.send(json.dumps({'type': 'conveyor_state', 'session_id': hello['session_id'],
+                                'running': False, 'thermal_blocked': True}))
+        self.wait_for_temperature(False)
+        self.assertTrue(self.temperature.snapshot()['thermal_blocked'])
+        self.assertIsNone(client.receive(timeout=.1))  # Resfriar não libera.
+        self.temperature.release_thermal_block()
+        control = self.receive(client)
+        self.assertEqual(control['type'], 'thermal_control')
+        self.assertFalse(control['blocked'])
+        confirm(self.sorter, 42)
+        self.assertEqual(self.receive(client)['track_id'], 42)
+
+    def test_reconnect_hello_preserves_thermal_block(self):
+        with self.temperature.lock:
+            self.temperature.value = self.temperature.critical + 1
+        first = self.connect()
+        self.assertTrue(self.receive(first)['thermal_blocked'])
+        first.close()
+        deadline = time.monotonic() + 2
+        while self.sorter.consumer_connected and time.monotonic() < deadline:
+            threading.Event().wait(.01)
+        second = self.connect()
+        self.assertTrue(self.receive(second)['thermal_blocked'])
 
 
     def test_same_object_does_not_stop_the_belt_again(self):

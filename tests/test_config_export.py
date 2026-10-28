@@ -46,6 +46,21 @@ class ConfigExportTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'Roxo'):
                 build_header()
 
+    def test_360_degree_servo_accepts_upper_half_and_decimal_angles(self):
+        with patch.multiple(config, SERVO_TRAVEL_DEG=360.0, SORT_TARGETS={
+            'Laranja': {'angle_deg': 0}, 'Verde-claro': {'angle_deg': 123.5},
+            'Azul-claro': {'angle_deg': 270}, 'Roxo': {'angle_deg': 360},
+        }):
+            self.assertIn('SERVO_TRAVEL_DEG = 360.0f;', build_header())
+
+    def test_360_degree_servo_rejects_invalid_color_positions(self):
+        for angle in (-1, 360.1, float('nan'), float('inf'), True):
+            with self.subTest(angle=angle), patch.multiple(
+                config, SERVO_TRAVEL_DEG=360.0, SORT_TARGETS={'Roxo': {'angle_deg': angle}},
+            ):
+                with self.assertRaisesRegex(ValueError, 'Roxo'):
+                    build_header()
+
     def test_invalid_servo_travel_is_rejected(self):
         for travel in (0, -1, float('nan'), float('inf'), True):
             with self.subTest(travel=travel), patch.object(config, 'SERVO_TRAVEL_DEG', travel):

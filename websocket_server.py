@@ -34,16 +34,30 @@ def init_websocket(app, get_snapshot, sorter, temperature=None):
             ws.close()
             return
         try:
-            ws.send(json.dumps({'type': 'hello', 'session_id': sorter.session_id}))
+            thermal_blocked = temperature.snapshot()['thermal_blocked'] if temperature is not None else False
+            sorter.set_thermal_blocked(thermal_blocked)
+            ws.send(json.dumps({'type': 'hello', 'session_id': sorter.session_id,
+                                'thermal_blocked': thermal_blocked}))
             sent_command = None
             deadline = None
             while ws.connected:
+                # Esta verificação independe da câmera e do navegador.
+                blocked = temperature.snapshot()['thermal_blocked'] if temperature is not None else False
+                sorter.set_thermal_blocked(blocked)
+                if blocked != thermal_blocked:
+                    ws.send(json.dumps({'type': 'thermal_control', 'session_id': sorter.session_id,
+                                        'blocked': blocked}))
+                    thermal_blocked = blocked
                 if sent_command is None:
                     command = sorter.current_command()
                     if command is not None:
-                        ws.send(json.dumps(command, ensure_ascii=False))
-                        sent_command = command['command_id']
-                        deadline = time.monotonic() + config.SORT_ACK_TIMEOUT_SECONDS
+                        if blocked:
+                            # Não guarde uma peça esperando a liberação térmica.
+                            sorter.cancel_command(command['command_id'], allow_retry=True)
+                        else:
+                            ws.send(json.dumps(command, ensure_ascii=False))
+                            sent_command = command['command_id']
+                            deadline = time.monotonic() + config.SORT_ACK_TIMEOUT_SECONDS
                 if deadline is not None and time.monotonic() >= deadline:
                     sorter.cancel_command(sent_command)
                     ws.close()
@@ -62,14 +76,14 @@ def init_websocket(app, get_snapshot, sorter, temperature=None):
                 if message.get('type') == 'conveyor_state':
                     running = message.get('running')
                     if temperature is not None and isinstance(running, bool):
-                        temperature.report(running)
+                        temperature.report(running, message.get('thermal_blocked'))
                 elif (message.get('type') == 'ack'
                       and sent_command is not None
                       and message.get('command_id') == sent_command
                       and sorter.acknowledge(sent_command, message.get('status'))):
                     running = message.get('conveyor_running')
                     if temperature is not None and isinstance(running, bool):
-                        temperature.report(running)
+                        temperature.report(running, message.get('thermal_blocked'))
                     sent_command = None
                     deadline = None
         except ConnectionClosed:

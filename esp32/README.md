@@ -10,18 +10,20 @@ por cor; não são identificados fisicamente pela câmera.
 | Cor detectada | Recipiente | Material atribuído | Ângulo inicial |
 |---|---|---|---|
 | Laranja | A | Plástico | 0° |
-| Verde-claro | B | Alumínio | 60° |
-| Azul-claro | C | Metal | 120° |
-| Roxo | D | Rejeito | 180° |
+| Verde-claro | B | Alumínio | 90° |
+| Azul-claro | C | Metal | 180° |
+| Roxo | D | Rejeito | 270° |
 
 Esses ângulos representam posições do eixo que devem alinhar o recipiente
 com a queda da esteira. A imagem não determina o zero nem o sentido do servo:
 calibre `SORT_TARGETS` em `config.py` na montagem real. Verde e azul continuam
 usando as mesmas faixas HSV anteriores (`Verde-claro` e `Azul-claro`).
-O servo atual foi confirmado como 180°: os quatro destinos estão distribuídos
-nesse curso como referência inicial. Ajuste os ângulos à posição real dos
-recipientes. Um prato que exija uma volta inteira precisa de uma montagem
-mecânica compatível; o software não aumenta o curso físico do servo.
+O servo atual foi confirmado como **posicional de 360°**. Edite o campo
+`angle_deg` de cada cor no bloco `SORT_TARGETS` do `config.py`. Cada cor aceita
+um valor próprio de 0 a 360°, inclusive valores decimais, como 312,5° (escreva
+`312.5` no Python). Ajuste os ângulos à posição real dos recipientes.
+Reinicie o Python para aplicar esses valores aos novos comandos. O firmware
+recebe o ângulo no JSON; a tabela de cores permanece centralizada no servidor.
 
 ## Câmera fixa e captura do fundo
 
@@ -115,7 +117,7 @@ Em `config.py` (exportado automaticamente para `EcoCycleConfig.h`):
 - `SERVO_MIN_US`, `SERVO_MAX_US`, `SERVO_FREQUENCY_HZ`: consulte o datasheet
   do modelo e calibre. **500–2500 µs e 50 Hz são valores de exemplo**, não uma
   especificação confirmada do seu servo.
-- `SERVO_TRAVEL_DEG`: atualmente 180°, conforme o servo confirmado.
+- `SERVO_TRAVEL_DEG`: atualmente 360°, conforme o servo posicional confirmado.
   A geração da configuração rejeita destinos fora desse curso.
 - `SERVO_CALIBRATED`: inicia em `False`; o firmware recebe os comandos mas
   responde `error` e não conecta o PWM. Configure os limites reais e então
@@ -154,6 +156,55 @@ deixa a esteira parada durante o boot e a conexão Wi-Fi, iniciando depois do
 `hello` do servidor. A direção usa IA alto/IB baixo ou o inverso; a parada usa
 as duas entradas baixas, conforme a [tabela do módulo L9110S](https://docs.sunfounder.com/projects/3in1-kit-r4/en/latest/components/component_l9110s.html).
 Esta versão liga/desliga o motor; não regula a velocidade por PWM.
+
+### Parada por temperatura crítica simulada
+
+`TEMP_CRITICAL_C` (60 °C) trava a esteira. O servidor verifica a temperatura
+no próprio loop do WebSocket, mesmo sem página aberta, e envia
+`{"type":"thermal_control","session_id":"...","blocked":true}` à placa.
+O firmware para o motor e impede a retomada automática por estado livre,
+conclusão do posicionamento ou reconexão. Um posicionamento em andamento
+pode terminar com a esteira parada.
+
+Esfriar não libera o bloqueio. Quando a temperatura chega a `TEMP_RELEASE_C`
+(50 °C) ou menos e a ESP32 confirma a parada, o painel habilita **Liberar
+esteira após resfriamento**. Esse botão chama
+`POST /api/conveyor/thermal/reset`. O servidor recusa com HTTP 409 se ainda
+estiver quente ou sem confirmação recente da placa. A liberação envia
+`thermal_control` com `blocked:false`; a esteira retoma quando estiver livre.
+
+O `hello` inclui `thermal_blocked` para não haver partida antes de conhecer
+o bloqueio. A ESP32 repete esse estado em `conveyor_state` e `ack`. Um `hello`
+de reconexão não remove um bloqueio local; a primeira telemetria permite ao
+servidor recuperar esse bloqueio, inclusive após reiniciar o Python. Sem
+fila, peças vistas durante a parada precisam ser confirmadas novamente
+depois da liberação. A mesma peça já tratada não é repetida.
+
+É necessário regravar o firmware atualizado para receber o comando térmico.
+Os valores são de uma simulação de temperatura; não medem aquecimento real.
+Temperatura e lote permanecem em memória no Python. Alterar os limites em
+`config.py` exige reiniciar o servidor.
+
+### Força e velocidade simuladas
+
+A massa simulada processada no lote representa a carga acumulada no prato.
+O modelo didático usa:
+
+```
+força_N = (pesoProcessadoGramas / 1000) * SERVO_SIMULATED_FORCE_PER_KG_N
+velocidade_m_s = CONVEYOR_ESTIMATED_SPEED_M_S / (1 + força_N / CONVEYOR_SIMULATED_FORCE_REFERENCE_N)
+```
+
+Com os valores iniciais, 0 g produzem 0 N e 0,10 m/s; 500 g produzem 1 N e
+aproximadamente 0,067 m/s; 1000 g produzem 2 N e 0,05 m/s. A velocidade é zero
+quando a placa informa parada e fica desconhecida sem telemetria recente.
+Sem lote configurado, a carga simulada é zero; iniciar outro lote reinicia
+essa carga. A simulação é determinística, sem saltos aleatórios a cada consulta.
+
+O painel indica **Simulada** e mostra a força equivalente em N. Não há sensor
+de força ou velocidade, nem relação mecânica medida entre servo e motor da
+esteira. Essa associação existe somente no modelo; ela não regula o motor
+físico. Os dois coeficientes e a velocidade de referência ficam em `config.py`.
 
 Ao detectar a desconexão do WebSocket, o firmware para a esteira. Se houver
 um ciclo em andamento, conclui o posicionamento mas só retoma o transporte
@@ -205,7 +256,7 @@ Se o servo não mover, gere as configurações com
 IDE. Esse sketch usa os mesmos pinos, frequência e pulsos do `config.py` e
 mantém as entradas da esteira em LOW. Não usa câmera nem Wi-Fi.
 
-Com o curso atual de 180°, alterna 90°, 60° e 120° a cada
+Com o curso atual de 360°, alterna 180°, 120° e 240° a cada
 `SERVO_TEST_STEP_MS` (2000 ms). Teste sem o prato/carga e acompanhe o Monitor
 Serial em 115200 baud. As mensagens indicam os pulsos aplicados. Se o PWM
 inicializar mas o servo não se mover nesse teste, investigue fiação,

@@ -20,13 +20,14 @@ class SortingController:
         self.active = None
         self.active_created = None
         self.consumer_connected = False
+        self.thermal_blocked = False
 
     def observe(self, detections):
         """Chamado uma vez por frame, mesmo sem navegador aberto."""
         with self.lock:
             # Sem fila: outra peça só será considerada em novos frames quando
             # a placa estiver livre. O mesmo ID já tratado permanece bloqueado.
-            if self.active is not None or not self.consumer_connected:
+            if self.active is not None or not self.consumer_connected or self.thermal_blocked:
                 self.confirmations.clear()
                 return
             present = {item['id'] for item in detections}
@@ -67,6 +68,12 @@ class SortingController:
             self.consumer_connected = True
             return True
 
+    def set_thermal_blocked(self, blocked):
+        with self.lock:
+            self.thermal_blocked = blocked
+            if blocked:
+                self.confirmations.clear()
+
     def release_consumer(self):
         with self.lock:
             self.consumer_connected = False
@@ -82,10 +89,12 @@ class SortingController:
                 self.active_created = None
             return None
 
-    def cancel_command(self, command_id):
+    def cancel_command(self, command_id, allow_retry=False):
         with self.lock:
             if self.active is not None and self.active['command_id'] == command_id:
                 logger.warning('Ciclo sem confirmação cancelado: %s.', command_id)
+                if allow_retry:
+                    self.handled_ids.discard(self.active['track_id'])
                 self.active = None
                 self.active_created = None
 

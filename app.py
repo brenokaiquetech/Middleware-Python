@@ -9,6 +9,7 @@ from sorting import sorter
 from generate_esp32_config import write_esp32_configs
 from temperature import temperature
 from batch_weights import batch_weights, BatchConflict
+from motion import simulated_motion
 
 app = Flask(__name__, static_folder="static")
 
@@ -33,6 +34,7 @@ def detection_snapshot():
     for item in detections:
         counts[item["color"]] += 1
     motor_state = temperature.snapshot()
+    batch = batch_weights.snapshot()
     return {
         "connected": connected,
         "background_ready": background_ready,
@@ -40,15 +42,8 @@ def detection_snapshot():
         "counts": counts,
         "detections": detections,
         "temperature": motor_state,
-        "conveyor": {
-            "running": motor_state["conveyor_running"],
-            "state_known": motor_state["state_known"],
-            "speed_m_s": (config.CONVEYOR_ESTIMATED_SPEED_M_S
-                          if motor_state["conveyor_running"] else 0.0)
-            if motor_state["state_known"] else None,
-            "speed_estimated": True,
-        },
-        "batch": batch_weights.snapshot(),
+        "conveyor": simulated_motion(motor_state, batch),
+        "batch": batch,
     }
 
 
@@ -58,6 +53,15 @@ init_websocket(app, detection_snapshot, sorter, temperature)
 @app.route("/api/detections")
 def api_detections():
     return jsonify(detection_snapshot())
+
+
+@app.route("/api/conveyor/thermal/reset", methods=["POST"])
+def release_thermal_block():
+    try:
+        temperature.release_thermal_block()
+    except ValueError as exc:
+        return jsonify({'error': str(exc), 'temperature': temperature.snapshot()}), 409
+    return jsonify({'ok': True, 'temperature': temperature.snapshot()})
 
 
 @app.route("/api/lote", methods=["GET", "POST"])
