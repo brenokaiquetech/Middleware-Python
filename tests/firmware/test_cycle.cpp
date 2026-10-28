@@ -9,7 +9,11 @@ void receive(const std::string& text) {
                   reinterpret_cast<uint8_t*>(const_cast<char*>(text.data())), text.size());
 }
 
-void hello() { receive(R"({"type":"hello","session_id":"test","thermal_blocked":false})"); }
+void hello(bool enabled = true) {
+  receive(enabled
+    ? R"({"type":"hello","session_id":"test","thermal_blocked":false,"triage_enabled":true})"
+    : R"({"type":"hello","session_id":"test","thermal_blocked":false,"triage_enabled":false})");
+}
 
 void cycle(const char* id, float angle = 90) {
   JsonDocument message;
@@ -47,7 +51,13 @@ int main() {
   assertMotor(false);
   advance(500);
   assertMotor(false);
-  hello();
+  hello(false);
+  advance(1000);
+  assertMotor(false);
+  cycle("before-start");
+  assertAck("before-start", "error");
+  assertMotor(false);
+  receive(R"({"type":"triage_control","session_id":"test","enabled":true})");
   assertMotor(true);
   auto writes = gpioWrites;
   for (int i = 0; i < 20; ++i) advance(1000);
@@ -87,7 +97,7 @@ int main() {
   advance(1500);
   assertMotor(true);
   assertAck("upper-half", "done");
-  std::cout << "PASS: posicao de 270 graus usa a metade superior do curso de 360\n";
+  std::cout << "PASS: posicao em 75% do curso usa a metade superior dos pulsos\n";
 
   cycle("invalid", SERVO_TRAVEL_DEG + 90);
   assertMotor(true);
@@ -168,4 +178,20 @@ int main() {
   receive(R"({"type":"thermal_control","session_id":"test","blocked":false})");
   assertMotor(true);
   std::cout << "PASS: fim do ciclo nao religa durante bloqueio termico\n";
+
+  cycle("pause-in-cycle");
+  receive(R"({"type":"triage_control","session_id":"test","enabled":false})");
+  advance(200);
+  advance(1500);
+  assertAck("pause-in-cycle", "done");
+  advance(10000);
+  assertMotor(false);
+  receive(R"({"type":"thermal_control","session_id":"test","blocked":true})");
+  receive(R"({"type":"thermal_control","session_id":"test","blocked":false})");
+  assertMotor(false);
+  receive(R"({"type":"triage_control","session_id":"wrong","enabled":true})");
+  assertMotor(false);
+  receive(R"({"type":"triage_control","session_id":"test","enabled":true})");
+  assertMotor(true);
+  std::cout << "PASS: inicio explicito e pausa persistem no fim do ciclo e na liberacao termica\n";
 }

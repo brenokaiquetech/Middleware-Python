@@ -53,9 +53,17 @@ class SortingTests(unittest.TestCase):
         self.sorter.observe([{'id': 2, 'color': 'Desconhecida'}])
         self.assertIsNone(self.sorter.current_command())
 
+    def test_reject_is_identified_but_does_not_trigger_sorting(self):
+        self.assertIn('Roxo', config.COLOR_RANGES)
+        self.assertEqual(config.BATCH_MATERIAL_BY_COLOR['Roxo'], 'REJEITO')
+        confirm(self.sorter, 99, 'Roxo')
+        self.assertIsNone(self.sorter.current_command())
+        confirm(self.sorter, 100, 'Laranja')
+        self.assertEqual(self.sorter.current_command()['track_id'], 100)
+
     def test_busy_objects_are_rechecked_in_new_frames_without_queue(self):
         confirm(self.sorter, 1)
-        confirm(self.sorter, 2, 'Roxo')
+        confirm(self.sorter, 2, 'Verde-claro')
         first = self.sorter.current_command()
         self.assertFalse(self.sorter.acknowledge('wrong', 'done'))
         self.assertFalse(self.sorter.acknowledge(first['command_id'], 'received'))
@@ -67,7 +75,7 @@ class SortingTests(unittest.TestCase):
         self.assertIsNone(self.sorter.current_command())
         # Nenhum comando foi guardado. Uma peça ainda visível precisa ser
         # confirmada novamente nos frames recebidos depois da retomada.
-        confirm(self.sorter, 2, 'Roxo')
+        confirm(self.sorter, 2, 'Verde-claro')
         second = self.sorter.current_command()
         self.assertEqual(second['track_id'], 2)
         self.sorter.acknowledge(second['command_id'], 'done')
@@ -181,7 +189,7 @@ class SortingSocketTests(unittest.TestCase):
         self.assertEqual(first['type'], 'sort_cycle')
         self.assertEqual(first['stop_ms'], config.SORT_STOP_MS)
         self.assertNotIn('hold_ms', first)
-        confirm(self.sorter, 2, 'Roxo')
+        confirm(self.sorter, 2, 'Verde-claro')
         self.assertIsNone(client.receive(timeout=.15))
         client.send(json.dumps({'type': 'ack', 'session_id': 'wrong',
                                 'command_id': first['command_id'], 'status': 'done'}))
@@ -197,10 +205,10 @@ class SortingSocketTests(unittest.TestCase):
         client.send(json.dumps({'type': 'ack', 'session_id': first['session_id'],
                                 'command_id': first['command_id'], 'status': 'done'}))
         self.assertIsNone(client.receive(timeout=.15))
-        confirm(self.sorter, 3, 'Roxo')
+        confirm(self.sorter, 3, 'Verde-claro')
         second = self.receive(client)
-        self.assertEqual(second['container'], 'D')
-        self.assertEqual(second['angle_deg'], config.SORT_TARGETS['Roxo']['angle_deg'])
+        self.assertEqual(second['container'], 'B')
+        self.assertEqual(second['angle_deg'], 90)
         self.assertNotEqual(second['command_id'], first['command_id'])
 
     def test_second_motor_client_is_rejected(self):

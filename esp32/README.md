@@ -12,18 +12,54 @@ por cor; não são identificados fisicamente pela câmera.
 | Laranja | A | Plástico | 0° |
 | Verde-claro | B | Alumínio | 90° |
 | Azul-claro | C | Metal | 180° |
-| Roxo | D | Rejeito | 270° |
+
+Roxo/rejeito fica fora do acionamento: não há comando de parada ou troca de
+recipiente para essa cor. A identificação e a simulação de peso permanecem iguais.
 
 Esses ângulos representam posições do eixo que devem alinhar o recipiente
 com a queda da esteira. A imagem não determina o zero nem o sentido do servo:
 calibre `SORT_TARGETS` em `config.py` na montagem real. Verde e azul continuam
 usando as mesmas faixas HSV anteriores (`Verde-claro` e `Azul-claro`).
-O servo atual foi confirmado como **posicional de 360°**. Edite o campo
+O servo atual é o **SG90 posicional de 180°**. Edite o campo
 `angle_deg` de cada cor no bloco `SORT_TARGETS` do `config.py`. Cada cor aceita
-um valor próprio de 0 a 360°, inclusive valores decimais, como 312,5° (escreva
-`312.5` no Python). Ajuste os ângulos à posição real dos recipientes.
+um valor próprio de 0 a 180°, inclusive valores decimais, como 90,5° (escreva
+`90.5` no Python). Ajuste os ângulos à posição real dos recipientes.
 Reinicie o Python para aplicar esses valores aos novos comandos. O firmware
 recebe o ângulo no JSON; a tabela de cores permanece centralizada no servidor.
+
+## Escolher lote e iniciar a triagem
+
+Ao abrir `/`, a página mostra os lotes locais de demonstração definidos em
+`AVAILABLE_BATCHES` no `config.py`. A integração com o backend continua
+pendente. Também aparecem lotes cadastrados pela API local de simulação.
+
+1. Clique em **Escolher lote** para reservar a seleção e abrir `/dashboard`.
+2. Prepare a câmera e aguarde o fundo e a ESP32 estarem prontos.
+3. Clique em **Iniciar triagem**. Só então o lote é iniciado para contabilização
+   pela câmera e o servidor autoriza o motor.
+
+Escolher o lote, abrir o dashboard, conectar a placa ou detectar uma cor não
+ligam a esteira. **Pausar triagem** retira a autorização e preserva o progresso;
+**Retomar triagem** precisa de novo clique. O botão **Lotes** pausa antes de
+voltar à lista. Um lote incompleto deve ser concluído antes de iniciar outro.
+Atualizar o dashboard não reinicia pesos nem cria nova autorização.
+
+Quando o peso simulado chega ao total, o servidor aguarda a confirmação do
+último posicionamento e mantém o transporte por `BATCH_FINISH_RUN_SECONDS`
+(3 s) de funcionamento contínuo antes de parar. Calibre esse intervalo com a
+distância da câmera até a saída e a velocidade real. Tempo parado por calor,
+pausa ou falta de comunicação não conta como transporte final. A conclusão
+e a parada não dependem de o navegador permanecer aberto.
+
+O estado fica em memória: reiniciar o Python limpa a seleção e exige novo
+início pelo operador. Uma reconexão de rede da placa pode retomar uma triagem
+que o operador já havia iniciado, respeitando os bloqueios térmicos.
+
+Rotas: `GET /api/lotes`, `POST /api/lotes/selecionar` com `loteId`,
+`POST /api/triagem/iniciar` com o mesmo `loteId` e `POST /api/triagem/pausar`.
+`/api/detections` inclui `triagem` com o lote, etapa, autorização e prontidão
+da placa. O servidor rejeita início sem seleção, com lote de outra tela,
+câmera indisponível, placa sem protocolo atualizado ou bloqueio térmico.
 
 ## Câmera fixa e captura do fundo
 
@@ -117,7 +153,7 @@ Em `config.py` (exportado automaticamente para `EcoCycleConfig.h`):
 - `SERVO_MIN_US`, `SERVO_MAX_US`, `SERVO_FREQUENCY_HZ`: consulte o datasheet
   do modelo e calibre. **500–2500 µs e 50 Hz são valores de exemplo**, não uma
   especificação confirmada do seu servo.
-- `SERVO_TRAVEL_DEG`: atualmente 360°, conforme o servo posicional confirmado.
+- `SERVO_TRAVEL_DEG`: atualmente 180°, para o SG90 posicional.
   A geração da configuração rejeita destinos fora desse curso.
 - `SERVO_CALIBRATED`: inicia em `False`; o firmware recebe os comandos mas
   responde `error` e não conecta o PWM. Configure os limites reais e então
@@ -152,8 +188,9 @@ substitui essa ligação.
 
 Habilite `CONVEYOR_ENABLED = True` depois de conferir as ligações. Para iniciar
 o transporte, `SERVO_CALIBRATED` também precisa estar em `True`. O firmware
-deixa a esteira parada durante o boot e a conexão Wi-Fi, iniciando depois do
-`hello` do servidor. A direção usa IA alto/IB baixo ou o inverso; a parada usa
+deixa a esteira parada durante o boot, a conexão Wi-Fi e a seleção do lote.
+A partida exige **Iniciar triagem** no dashboard. A direção usa IA alto/IB
+baixo ou o inverso; a parada usa
 as duas entradas baixas, conforme a [tabela do módulo L9110S](https://docs.sunfounder.com/projects/3in1-kit-r4/en/latest/components/component_l9110s.html).
 Esta versão liga/desliga o motor; não regula a velocidade por PWM.
 
@@ -171,7 +208,8 @@ Esfriar não libera o bloqueio. Quando a temperatura chega a `TEMP_RELEASE_C`
 esteira após resfriamento**. Esse botão chama
 `POST /api/conveyor/thermal/reset`. O servidor recusa com HTTP 409 se ainda
 estiver quente ou sem confirmação recente da placa. A liberação envia
-`thermal_control` com `blocked:false`; a esteira retoma quando estiver livre.
+`thermal_control` com `blocked:false`; a esteira retoma quando estiver livre
+e a triagem continuar autorizada. Liberar o calor não inicia uma triagem pausada.
 
 O `hello` inclui `thermal_blocked` para não haver partida antes de conhecer
 o bloqueio. A ESP32 repete esse estado em `conveyor_state` e `ack`. Um `hello`
@@ -256,7 +294,7 @@ Se o servo não mover, gere as configurações com
 IDE. Esse sketch usa os mesmos pinos, frequência e pulsos do `config.py` e
 mantém as entradas da esteira em LOW. Não usa câmera nem Wi-Fi.
 
-Com o curso atual de 360°, alterna 180°, 120° e 240° a cada
+Com o curso atual de 180°, alterna 90°, 60° e 120° a cada
 `SERVO_TEST_STEP_MS` (2000 ms). Teste sem o prato/carga e acompanhe o Monitor
 Serial em 115200 baud. As mensagens indicam os pulsos aplicados. Se o PWM
 inicializar mas o servo não se mover nesse teste, investigue fiação,
@@ -274,13 +312,26 @@ outra peça ainda visível pode ser confirmada nos novos quadros. Se passar
 pela câmera durante a indisponibilidade, não será recuperada por uma fila.
 
 A placa tenta restabelecer o WebSocket a cada 5 segundos após desconectar.
-Não é necessário enviar comando de inscrição. Somente uma ESP32 pode usar
+O firmware envia sua identificação automaticamente. Somente uma ESP32 pode usar
 `/ws/sorter` por vez; monitoramento continua disponível em `/ws/detections`.
 
 ## Protocolo de comandos
 
-Ao conectar, o servidor envia `{"type":"hello","session_id":"..."}`.
-Para cada novo ID confirmado, envia uma instrução:
+Ao conectar, a placa envia
+`{"type":"client_hello","protocol":2,"operator_start":true}`. O servidor
+aguarda essa identificação antes de enviar qualquer `hello`; firmware antigo
+recebe erro e não recebe a instrução que antes causava partida automática.
+Regrave a ESP32 com o sketch atualizado.
+
+O servidor responde com
+`{"type":"hello","session_id":"...","thermal_blocked":false,"triage_enabled":false}`.
+O clique em iniciar envia
+`{"type":"triage_control","session_id":"...","enabled":true}`; pausa e
+conclusão enviam o mesmo tipo com `enabled:false`. A placa confirma o estado
+em `conveyor_state` e `ack`, incluindo `triage_enabled`. A autorização é
+verificada na partida, nas retomadas e antes de aceitar um novo ciclo.
+
+Para cada novo ID confirmado durante uma triagem autorizada, envia:
 
 ```json
 {

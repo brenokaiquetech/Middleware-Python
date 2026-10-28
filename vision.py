@@ -10,6 +10,7 @@ from batch_weights import batch_weights
 from mjpeg import JPEGStreamParser
 from background import BackgroundFilter
 from camera_buffer import LatestCameraFrame
+from triage import triage
 
 from config import (
     CAMERA_URL, FRAME_SIZE, MIN_CONTOUR_AREA, MIN_BOX_WIDTH,
@@ -213,10 +214,14 @@ def process_camera_frame(frame):
     frame = cv2.resize(frame, FRAME_SIZE)
     detections, bounds = detect_objects(frame)
     with lock:
+        if background_reset_requested or not triage.processing_allowed():
+            processing_detections = []
+        else:
+            processing_detections = detections
         if background_reset_requested:
             detections = []
-        sorter.observe(detections)
-        batch_weights.observe(detections)
+        sorter.observe(processing_detections)
+        batch_weights.observe(processing_detections)
 
     x1, y1, x2, y2 = bounds
     cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 235, 136), 2)

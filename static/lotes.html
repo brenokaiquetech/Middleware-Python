@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EcoCycle | Escolher lote</title>
+<style>
+:root{--dark:#104a35;--green:#16865a;--muted:#65776e;--border:#dce7e0;--bg:#f3f7f5}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:#1b3027;font-family:Inter,"Segoe UI",Arial,sans-serif}main{max-width:1150px;margin:auto;padding:38px 28px 60px}.brand{display:flex;align-items:center;gap:10px;font-size:19px;font-weight:800;color:var(--dark)}.brand-mark{width:35px;height:35px;border-radius:10px;background:var(--dark);color:white;display:grid;place-items:center;font-size:23px}.topbar{display:flex;justify-content:space-between;align-items:center;gap:18px}.demo{font-size:11px;padding:8px 12px;border:1px solid var(--border);border-radius:20px;color:var(--muted);background:white}.intro{margin-top:58px;max-width:640px}.eyebrow{font-size:11px;font-weight:800;letter-spacing:2px;color:var(--green)}h1{font-size:clamp(30px,4vw,44px);line-height:1.15;letter-spacing:-1.3px;color:var(--dark);margin:14px 0}p{line-height:1.6;color:var(--muted)}.steps{display:flex;gap:22px;flex-wrap:wrap;margin:28px 0 38px;font-size:12px;color:var(--muted)}.steps span{display:flex;align-items:center;gap:8px}.steps b{width:23px;height:23px;border-radius:50%;background:#e0eee5;color:var(--green);display:grid;place-items:center;font-size:10px}.section-top{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:18px}.section-top h2{font-size:18px;margin:0}.secondary{background:white;border:1px solid var(--border);border-radius:9px;padding:10px 14px;color:var(--dark);font:inherit;font-size:12px;cursor:pointer}.lots{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px}.lot{background:white;border:1px solid var(--border);border-radius:16px;padding:23px;display:flex;flex-direction:column;min-width:0;box-shadow:0 4px 18px #173b2805}.lot.selected{border-color:var(--green)}.lot-top{display:flex;align-items:center;justify-content:space-between;gap:8px}.lot-id{font-size:10px;font-weight:800;letter-spacing:1.1px;color:var(--muted)}.badge{font-size:10px;border-radius:20px;padding:6px 9px;background:#e8f5ed;color:var(--green);white-space:nowrap}.badge.done{background:#f1f3f2;color:var(--muted)}.lot h3{font-size:21px;line-height:1.3;letter-spacing:-.4px;margin:25px 0 18px;color:var(--dark)}.weight{font-size:35px;letter-spacing:-1px;font-weight:750;color:var(--dark)}.weight small{font-size:13px;font-weight:500;letter-spacing:0;color:var(--muted)}.weight-label{font-size:11px;margin:5px 0 26px;color:var(--muted)}.choose{margin-top:auto;width:100%;background:var(--dark);color:white;border:0;border-radius:9px;font:inherit;font-size:13px;padding:13px 12px;cursor:pointer}.choose:disabled{background:#eef2ef;color:#7a8b81;cursor:default}.note{margin:28px 0 0;padding:16px 19px;border-radius:10px;background:#e7f2eb;color:#416650;font-size:12px}.empty{grid-column:1/-1;padding:32px;background:white;border:1px solid var(--border);border-radius:15px;color:var(--muted)}.error{color:#a34327;font-size:13px;min-height:20px;margin-top:18px}
+@media(max-width:850px){.lots{grid-template-columns:repeat(2,minmax(0,1fr))}.intro{margin-top:40px}}
+@media(max-width:580px){main{padding:24px 16px 40px}.brand{font-size:17px}.demo{font-size:9px;padding:7px 9px}.intro{margin-top:38px}h1{letter-spacing:-.8px}.steps{gap:12px;font-size:10px;margin-bottom:28px}.lots{grid-template-columns:1fr}.lot h3{margin-top:19px}.lot{padding:21px}.section-top h2{font-size:16px}}
+</style>
+</head>
+<body>
+<main>
+  <div class="topbar"><div class="brand"><span class="brand-mark" aria-hidden="true">↻</span> EcoCycle</div><span class="demo">Lotes de demonstração</span></div>
+  <div class="intro"><span class="eyebrow">PREPARAR OPERAÇÃO</span><h1>Qual lote vamos separar?</h1><p>Escolha um lote disponível para acompanhar os materiais, o peso processado e o estado da esteira.</p></div>
+  <div class="steps" aria-label="Etapas da operação"><span><b>1</b> Escolha o lote</span><span><b>2</b> Confira o dashboard</span><span><b>3</b> Inicie a triagem</span></div>
+  <section aria-labelledby="lotsTitle">
+    <div class="section-top"><h2 id="lotsTitle">Lotes disponíveis</h2><button type="button" class="secondary" id="reloadLots">Atualizar lista</button></div>
+    <div id="lots" class="lots"><p class="empty">Carregando lotes...</p></div>
+    <p class="error" id="error" role="alert"></p>
+  </section>
+  <p class="note">Escolher um lote não liga a esteira. O motor será autorizado quando você clicar em <strong>Iniciar triagem</strong> no dashboard.</p>
+</main>
+<script>
+const list=document.querySelector('#lots'), error=document.querySelector('#error');
+function element(tag,text,className){const node=document.createElement(tag);node.textContent=text;if(className)node.className=className;return node;}
+async function choose(lot,button){
+  button.disabled=true;error.textContent='';
+  try{
+    const response=await fetch('/api/lotes/selecionar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({loteId:lot.loteId})});
+    const data=await response.json();
+    if(!response.ok)throw new Error(data.error || 'Não foi possível escolher o lote.');
+    window.location.assign(data.url);
+  }catch(failure){error.textContent=failure.message;button.disabled=false;}
+}
+async function loadLots(){
+  const reload=document.querySelector('#reloadLots');reload.disabled=true;error.textContent='';
+  try{
+    const response=await fetch('/api/lotes',{cache:'no-store'});
+    if(!response.ok)throw new Error('Não foi possível carregar os lotes.');
+    const data=await response.json();list.replaceChildren();
+    if(!data.lotes.length)list.append(element('p','Nenhum lote disponível no momento.','empty'));
+    const labels={DISPONIVEL:'Disponível',SELECIONADO:'Selecionado',EM_ANDAMENTO:'Em andamento',CONCLUIDO:'Concluído'};
+    for(const lot of data.lotes){
+      const card=element('article','',`lot${data.triagem.loteId===lot.loteId?' selected':''}`);
+      const top=element('div','','lot-top');top.append(element('span',lot.loteId,'lot-id'),element('span',labels[lot.status]||lot.status,`badge${lot.status==='CONCLUIDO'?' done':''}`));
+      card.append(top,element('h3',lot.nome));
+      const weight=element('div',lot.pesoTotalLoteGramas.toLocaleString('pt-BR')+' ','weight');weight.append(element('small','g'));
+      card.append(weight,element('p','Peso total do lote','weight-label'));
+      const button=element('button',lot.status==='CONCLUIDO'?'Ver lote':lot.status==='EM_ANDAMENTO'?'Continuar lote':'Escolher lote','choose');
+      button.type='button';button.disabled=!lot.can_select;
+      if(!lot.can_select)button.title=lot.status==='CONCLUIDO'?'Este lote já foi concluído.':'Conclua o lote atual para escolher outro.';
+      button.addEventListener('click',()=>choose(lot,button));card.append(button);list.append(card);
+    }
+  }catch(failure){error.textContent=failure.message;list.replaceChildren(element('p','A lista está indisponível. Tente atualizar novamente.','empty'));}
+  finally{reload.disabled=false;}
+}
+document.querySelector('#reloadLots').addEventListener('click',loadLots);loadLots();
+</script>
+</body>
+</html>

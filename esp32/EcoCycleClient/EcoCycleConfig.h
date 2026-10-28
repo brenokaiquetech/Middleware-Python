@@ -24,4 +24,4 @@ constexpr unsigned long TELEMETRY_INTERVAL_MS = 1000UL;
 constexpr bool SERVO_CALIBRATED = true;
 constexpr bool CONVEYOR_ENABLED = true;
 constexpr bool CONVEYOR_FORWARD_IA_HIGH = true;
-constexpr float SERVO_TRAVEL_DEG = 360.0f;
+constexpr float SERVO_TRAVEL_DEG = 180.0f;

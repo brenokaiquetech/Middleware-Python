@@ -8,7 +8,7 @@ from simple_websocket import ConnectionClosed
 import config
 
 
-def init_websocket(app, get_snapshot, sorter, temperature=None):
+def init_websocket(app, get_snapshot, sorter, temperature=None, triage=None):
     app.config["SOCK_SERVER_OPTIONS"] = {
         "ping_interval": config.WS_PING_INTERVAL,
         "max_message_size": 4096,
@@ -34,10 +34,25 @@ def init_websocket(app, get_snapshot, sorter, temperature=None):
             ws.close()
             return
         try:
+            if triage is not None:
+                triage.set_device_ready(False)
+                raw = ws.receive(timeout=config.ESP32_HANDSHAKE_TIMEOUT_SECONDS)
+                try:
+                    client = json.loads(raw) if raw else None
+                except (ValueError, TypeError):
+                    client = None
+                if (not isinstance(client, dict) or client.get('type') != 'client_hello'
+                        or client.get('protocol') != 2 or client.get('operator_start') is not True):
+                    # Firmware antigo não recebe hello: assim não pode partir sozinho.
+                    ws.send(json.dumps({'type': 'error', 'reason': 'Atualize o firmware para iniciar por lote.'}))
+                    ws.close()
+                    return
+                triage.set_device_ready(True)
             thermal_blocked = temperature.snapshot()['thermal_blocked'] if temperature is not None else False
+            triage_enabled = triage.snapshot()['enabled'] if triage is not None else True
             sorter.set_thermal_blocked(thermal_blocked)
             ws.send(json.dumps({'type': 'hello', 'session_id': sorter.session_id,
-                                'thermal_blocked': thermal_blocked}))
+                                'thermal_blocked': thermal_blocked, 'triage_enabled': triage_enabled}))
             sent_command = None
             deadline = None
             while ws.connected:
@@ -48,10 +63,15 @@ def init_websocket(app, get_snapshot, sorter, temperature=None):
                     ws.send(json.dumps({'type': 'thermal_control', 'session_id': sorter.session_id,
                                         'blocked': blocked}))
                     thermal_blocked = blocked
+                enabled = triage.snapshot()['enabled'] if triage is not None else True
+                if enabled != triage_enabled:
+                    ws.send(json.dumps({'type': 'triage_control', 'session_id': sorter.session_id,
+                                        'enabled': enabled}))
+                    triage_enabled = enabled
                 if sent_command is None:
                     command = sorter.current_command()
                     if command is not None:
-                        if blocked:
+                        if blocked or not enabled:
                             # Não guarde uma peça esperando a liberação térmica.
                             sorter.cancel_command(command['command_id'], allow_retry=True)
                         else:
@@ -89,6 +109,8 @@ def init_websocket(app, get_snapshot, sorter, temperature=None):
         except ConnectionClosed:
             pass
         finally:
+            if triage is not None:
+                triage.set_device_ready(False)
             if temperature is not None:
                 temperature.disconnect()
             sorter.release_consumer()

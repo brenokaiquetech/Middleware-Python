@@ -70,6 +70,7 @@ class CameraProcessingTests(unittest.TestCase):
         detection = {'id': 1, 'color': 'Laranja', 'x': 20, 'y': 20, 'w': 25, 'h': 25}
         sequence = []
         with patch.object(vision, 'background_reset_requested', False), \
+                patch.object(vision.triage, 'processing_allowed', return_value=True), \
                 patch.object(vision, 'latest_frame', None), \
                 patch.object(vision, 'latest_detections', []), \
                 patch.object(vision, 'detect_objects', return_value=([detection], (0, 0, 160, 120))), \
@@ -91,3 +92,18 @@ class CameraProcessingTests(unittest.TestCase):
             vision.process_camera_frame(frame)
             self.assertEqual(vision.latest_detections, [])
         observe.assert_called_once_with([])
+
+    def test_materials_are_not_accounted_before_operator_start(self):
+        frame = vision.np.zeros((120, 160, 3), dtype=vision.np.uint8)
+        detection = {'id': 1, 'color': 'Laranja', 'x': 20, 'y': 20, 'w': 25, 'h': 25}
+        with patch.object(vision, 'background_reset_requested', False), \
+                patch.object(vision, 'latest_frame', None), \
+                patch.object(vision, 'latest_detections', []), \
+                patch.object(vision.triage, 'processing_allowed', return_value=False), \
+                patch.object(vision, 'detect_objects', return_value=([detection], (0, 0, 160, 120))), \
+                patch.object(vision.sorter, 'observe') as observe, \
+                patch.object(vision.batch_weights, 'observe') as weigh:
+            vision.process_camera_frame(frame)
+            self.assertEqual(vision.latest_detections, [detection])  # Prévia permanece visível.
+        observe.assert_called_once_with([])
+        weigh.assert_called_once_with([])

@@ -11,20 +11,21 @@ os.environ["OPENBLAS_NUM_THREADS"] = "1"
 os.environ["OMP_NUM_THREADS"] = "1"
 
 # REDE: valores que normalmente mudam ao instalar em outro local.
-CAMERA_URL = "http://10.99.137.209:8080/video"
+CAMERA_URL = "http://10.97.5.5:8080/video"
+#CAMERA_URL = "http://192.168.43.249:8080/video"
 SERVER_PUBLIC_HOST = "192.168.43.37"  # IPv4 do computador na rede da ESP32.
 HOST = "0.0.0.0"  # Interface em que o servidor escuta; não é o IP da ESP32.
 PORT = 8000  # Usada pelo site e pelos WebSockets.
 ESP32_WIFI_SSID = "Uaifai Gratis"
 ESP32_WIFI_PASSWORD = "1122334455"
 
-# ESP32 / SERVO POSICIONAL: calibre segundo o modelo e a montagem.
+# ESP32 / SERVO SG90 POSICIONAL DE 180°: calibre conforme a montagem.
 SERVO_CALIBRATED = True
 SERVO_PIN = 18
 SERVO_FREQUENCY_HZ = 50
 SERVO_MIN_US = 500  # Exemplo; confirme o pulso mínimo do modelo.
 SERVO_MAX_US = 2500  # Exemplo; confirme o pulso máximo do modelo.
-SERVO_TRAVEL_DEG = 360.0  # Servo POSICIONAL 0–360°.
+SERVO_TRAVEL_DEG = 180.0  # SG90 posicional 0–180°.
 SERVO_TEST_STEP_MS = 2000  # Intervalo do sketch de diagnóstico do servo.
 
 # ESTEIRA / L9110S: entradas IA e IB de um mesmo canal do driver.
@@ -71,6 +72,15 @@ BATCH_MATERIAL_LABELS = {
     "REJEITO": "Rejeito",
 }
 
+# Lotes de demonstração enquanto a integração com o backend não está disponível.
+AVAILABLE_BATCHES = [
+    {"loteId": "LOTE-001", "nome": "Lote de demonstração 01", "pesoTotalLoteGramas": 50000000},
+    {"loteId": "LOTE-002", "nome": "Lote de demonstração 02", "pesoTotalLoteGramas": 30000000},
+    {"loteId": "LOTE-003", "nome": "Lote de demonstração 03", "pesoTotalLoteGramas": 100000000},
+]
+BATCH_FINISH_RUN_SECONDS = 3.0  # Transporte final após posicionar a última peça; calibre na montagem.
+ESP32_HANDSHAKE_TIMEOUT_SECONDS = 3.0
+
 # WEBSOCKETS
 WS_PATH = "/ws/detections"
 WS_SEND_INTERVAL = 0.5  # Segundos entre atualizações para a ESP32.
@@ -86,13 +96,13 @@ SORT_STOP_MS = 200  # Intervalo entre mandar parar e movimentar o prato.
 SORT_SETTLE_MS = 1500  # Aguarde o posicionamento; ajuste com a carga real.
 
 # EDITE angle_deg DE CADA COR para alinhar os recipientes com a saída.
-# Aceita valores decimais de 0 até SERVO_TRAVEL_DEG (360° atualmente).
+# Aceita valores decimais de 0 até SERVO_TRAVEL_DEG (180° atualmente).
 # Os ângulos são enviados pelo servidor; reinicie o Python após alterá-los.
+# Roxo/rejeito permanece na identificação e na simulação de peso, sem acionar o servo.
 SORT_TARGETS = {
     "Laranja": {"container": "A", "material": "Plástico", "angle_deg": 0},
     "Verde-claro": {"container": "B", "material": "Alumínio", "angle_deg": 90},
     "Azul-claro": {"container": "C", "material": "Metal", "angle_deg": 180},
-    "Roxo": {"container": "D", "material": "Rejeito", "angle_deg": 270},
 }
 
 # CÂMERA / VISÃO: parâmetros mantidos do processamento original.

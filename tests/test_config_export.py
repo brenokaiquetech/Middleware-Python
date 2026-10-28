@@ -8,6 +8,13 @@ from generate_esp32_config import build_header, write_esp32_config
 
 
 class ConfigExportTests(unittest.TestCase):
+    def test_sg90_has_three_material_positions_within_180_degrees(self):
+        self.assertEqual(config.SERVO_TRAVEL_DEG, 180)
+        self.assertEqual({color: target['angle_deg'] for color, target in config.SORT_TARGETS.items()}, {
+            'Laranja': 0, 'Verde-claro': 90, 'Azul-claro': 180,
+        })
+        self.assertIn('SERVO_TRAVEL_DEG = 180.0f;', build_header())
+
     def test_servo_diagnostic_header_uses_same_pins_without_wifi_credentials(self):
         source = build_header(include_network=False)
         self.assertNotIn('WIFI_PASSWORD', source)

@@ -32,11 +32,20 @@ cada peça recebe um peso uma única vez. Atualizar a tela ou repetir o mesmo
 `eventoId` não sorteia outro peso nem modifica totais. Não há meta de peso
 por categoria: a composição depende dos materiais realmente identificados.
 
-A contabilização da câmera acontece na identificação confirmada, como no
-documento, independentemente da conexão da ESP32 e da confirmação do motor.
-Não comprova que a peça caiu no recipiente. A conclusão deste lote simulado
-não modifica o acionamento da esteira/servo: esse controle mantém seu ciclo
-de parar, posicionar e retomar. Não foi adicionada fila de objetos.
+A contabilização da câmera acontece na identificação confirmada durante
+uma triagem iniciada pelo operador, com comunicação recente da placa e sem
+bloqueio térmico. Selecionar um lote e visualizar a câmera não sorteiam pesos.
+O peso continua sendo simulado na identificação; não comprova que a peça caiu
+no recipiente. Ao concluir o lote, a esteira termina o ciclo atual, mantém o
+transporte pelo intervalo configurado e pausa. Não foi adicionada fila de objetos.
+
+## Operação pela página
+
+Abra a página inicial, selecione um dos lotes em `AVAILABLE_BATCHES` no
+`config.py` e clique em **Iniciar triagem** no dashboard. A seleção apenas
+prepara o lote; o início da contabilização depende desse segundo clique.
+Pausar a triagem interrompe a contabilização por câmera e preserva o progresso.
+A lista atual é local e demonstrativa; não consulta o backend externo.
 
 ## Iniciar um lote localmente
 
@@ -46,8 +55,10 @@ Com o servidor em execução, use outro terminal PowerShell:
 Invoke-RestMethod -Method Post -Uri 'http://localhost:8000/api/lote' -ContentType 'application/json' -Body '{"loteId":"LOTE-001","pesoTotalLoteGramas":1000}'
 ```
 
-A câmera passa a contabilizar os IDs confirmados e o painel exibe o saldo e
-os subtotais. Até o lote ser cadastrado, não são sorteados pesos.
+Esse endpoint cadastra o lote para simulação, mas não autoriza a partida do
+motor nem a contagem por câmera. O lote aparece na lista; selecione-o e clique
+em **Iniciar triagem** para operar. O endpoint manual de peças abaixo continua
+disponível para testes da simulação sem acionar motores.
 Use a porta configurada em `PORT` caso tenha alterado a porta padrão.
 
 Também é possível testar sem câmera e sem ESP32:

@@ -2,7 +2,7 @@
 import config
 import vision
 from websocket_server import init_websocket
-from flask import Flask, Response, jsonify, request, send_from_directory
+from flask import Flask, Response, jsonify, request, send_from_directory, redirect, url_for
 import os
 import threading
 from sorting import sorter
@@ -10,13 +10,22 @@ from generate_esp32_config import write_esp32_configs
 from temperature import temperature
 from batch_weights import batch_weights, BatchConflict
 from motion import simulated_motion
+from triage import triage
 
 app = Flask(__name__, static_folder="static")
 
 
 @app.route("/")
 def index():
-    return send_from_directory("static", "index.html")
+    return send_from_directory("static", "lotes.html")
+
+
+@app.route('/dashboard')
+def dashboard():
+    selected = triage.snapshot()['loteId']
+    if not selected or request.args.get('lote', selected) != selected:
+        return redirect(url_for('index'))
+    return send_from_directory('static', 'index.html')
 
 
 def detection_snapshot():
@@ -44,10 +53,52 @@ def detection_snapshot():
         "temperature": motor_state,
         "conveyor": simulated_motion(motor_state, batch),
         "batch": batch,
+        "triagem": triage.snapshot(),
     }
 
 
-init_websocket(app, detection_snapshot, sorter, temperature)
+init_websocket(app, detection_snapshot, sorter, temperature, triage)
+
+
+@app.route('/api/lotes')
+def available_lots():
+    return jsonify({'lotes': triage.available_lots(), 'triagem': triage.snapshot(),
+                    'fonte': 'demonstracao_local'})
+
+
+@app.route('/api/lotes/selecionar', methods=['POST'])
+def select_lot():
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or not isinstance(data.get('loteId'), str):
+        return jsonify({'error': 'Informe loteId em um objeto JSON.'}), 400
+    try:
+        state = triage.select(data['loteId'])
+    except BatchConflict as exc:
+        return jsonify({'error': str(exc)}), 409
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 404
+    return jsonify({'triagem': state, 'url': url_for('dashboard', lote=state['loteId'])})
+
+
+@app.route('/api/triagem/iniciar', methods=['POST'])
+def start_triage():
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({'error': 'Informe loteId em um objeto JSON.'}), 400
+    with vision.lock:
+        camera_ready = (vision.latest_frame is not None and vision.background_filter.ready
+                        and not vision.background_reset_requested)
+    if not camera_ready:
+        return jsonify({'error': 'Aguarde a câmera e o registro do fundo antes de iniciar.'}), 409
+    try:
+        return jsonify({'triagem': triage.start(data.get('loteId'))})
+    except BatchConflict as exc:
+        return jsonify({'error': str(exc)}), 409
+
+
+@app.route('/api/triagem/pausar', methods=['POST'])
+def pause_triage():
+    return jsonify({'triagem': triage.pause()})
 
 
 @app.route("/api/detections")
@@ -71,6 +122,8 @@ def api_batch():
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return jsonify({"erro": "Envie loteId e pesoTotalLoteGramas em um objeto JSON."}), 400
+    if triage.snapshot()['enabled'] and data.get('loteId') != batch_weights.snapshot()['loteId']:
+        return jsonify({'erro': 'Pause a triagem antes de cadastrar outro lote.'}), 409
     try:
         return jsonify(batch_weights.start_lot(data.get("loteId"), data.get("pesoTotalLoteGramas")))
     except BatchConflict as exc:

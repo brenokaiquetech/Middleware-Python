@@ -20,6 +20,7 @@ bool conveyorRunning = false;
 bool servoReady = false;
 bool thermalBlocked = true;  // Aguarde o estado térmico enviado pelo servidor.
 bool thermalStateKnown = false;
+bool triageEnabled = false;  // Só o clique em Iniciar triagem autoriza o motor.
 uint32_t phaseStarted = 0;
 uint32_t stopDuration = 0;
 uint32_t settleDuration = 0;
@@ -37,6 +38,7 @@ void reportConveyorState() {
   message["session_id"] = serverSession;
   message["running"] = conveyorRunning;
   message["thermal_blocked"] = thermalBlocked;
+  message["triage_enabled"] = triageEnabled;
   String text;
   serializeJson(message, text);
   webSocket.sendTXT(text);
@@ -54,7 +56,7 @@ void stopConveyor() {
 }
 
 void startConveyor() {
-  if (conveyorRunning || !hardwareReady() || !serverReady || thermalBlocked || phase != IDLE) return;
+  if (conveyorRunning || !hardwareReady() || !serverReady || thermalBlocked || !triageEnabled || phase != IDLE) return;
   digitalWrite(CONVEYOR_PIN_IA, CONVEYOR_FORWARD_IA_HIGH ? HIGH : LOW);
   digitalWrite(CONVEYOR_PIN_IB, CONVEYOR_FORWARD_IA_HIGH ? LOW : HIGH);
   conveyorRunning = true;
@@ -70,6 +72,7 @@ void acknowledge(const String& session, const String& command, const char* statu
   ack["status"] = status;
   ack["conveyor_running"] = conveyorRunning;
   ack["thermal_blocked"] = thermalBlocked;
+  ack["triage_enabled"] = triageEnabled;
   String text;
   serializeJson(ack, text);
   webSocket.sendTXT(text);
@@ -95,6 +98,7 @@ void startSortCycle(JsonDocument& doc) {
   else if (!CONVEYOR_ENABLED) reason = "esteira desabilitada";
   else if (!serverReady) reason = "servidor indisponivel";
   else if (thermalBlocked) reason = "bloqueio por temperatura critica";
+  else if (!triageEnabled) reason = "triagem nao iniciada pelo operador";
   else if (phase != IDLE) reason = "ciclo em andamento";
   else if (doc["angle_deg"].isNull() || !isfinite(angle)
            || angle < 0 || angle > SERVO_TRAVEL_DEG) reason = "angulo fora do curso do servo";
@@ -108,7 +112,7 @@ void startSortCycle(JsonDocument& doc) {
     return;
   }
 
-  // Curso configurável (360° atualmente): write() limita ângulos a 180°.
+  // Converte o ângulo dentro do curso configurado em pulso para o servo posicional.
   // Converta o ângulo recebido em pulso calibrado e use writeMicroseconds().
   targetPulseUs = lroundf(SERVO_MIN_US +
                          (angle / SERVO_TRAVEL_DEG) * (SERVO_MAX_US - SERVO_MIN_US));
@@ -128,11 +132,23 @@ void startSortCycle(JsonDocument& doc) {
 
 void onWebSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
   switch (type) {
-    case WStype_CONNECTED:
+    case WStype_CONNECTED: {
+      serverReady = false;
+      triageEnabled = false;
+      stopConveyor();
       Serial.println("WebSocket conectado.");
+      JsonDocument client;
+      client["type"] = "client_hello";
+      client["protocol"] = 2;
+      client["operator_start"] = true;
+      String text;
+      serializeJson(client, text);
+      webSocket.sendTXT(text);
       break;
+    }
     case WStype_DISCONNECTED:
       serverReady = false;
+      triageEnabled = false;
       stopConveyor();
       Serial.println("WebSocket desconectado. Tentando reconectar...");
       break;
@@ -152,8 +168,22 @@ void onWebSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
         // Um hello de reconexao nao substitui a liberacao manual explicita.
         thermalBlocked = thermalStateKnown ? thermalBlocked || serverBlocked : serverBlocked;
         thermalStateKnown = true;
-        if (thermalBlocked) stopConveyor();
+        triageEnabled = doc["triage_enabled"].is<bool>() && doc["triage_enabled"].as<bool>();
+        if (thermalBlocked || !triageEnabled) stopConveyor();
         startConveyor();
+        reportConveyorState();
+        if (!triageEnabled) Serial.println("Aguardando selecao do lote e Iniciar triagem no painel.");
+      } else if (strcmp(messageType, "triage_control") == 0) {
+        String session = doc["session_id"] | "";
+        if (!serverReady || session != serverSession || !doc["enabled"].is<bool>()) return;
+        triageEnabled = doc["enabled"].as<bool>();
+        if (triageEnabled) {
+          startConveyor();
+          Serial.println("Triagem autorizada pelo operador.");
+        } else {
+          stopConveyor();
+          Serial.println("Triagem pausada ou lote concluido. Esteira parada.");
+        }
         reportConveyorState();
       } else if (strcmp(messageType, "thermal_control") == 0) {
         String session = doc["session_id"] | "";
@@ -233,7 +263,8 @@ void loop() {
     // Se estiver offline, mantem a esteira parada. Na reconexao, hello
     // retoma a esteira e a repeticao do comando recebe ack sem novo movimento.
     if (serverReady) acknowledge(completedSession, completedCommand, "done");
-    Serial.println(thermalBlocked ? "Recipiente pronto. Esteira bloqueada por temperatura."
+    Serial.println(!triageEnabled ? "Recipiente pronto. Aguardando Iniciar triagem."
+                   : thermalBlocked ? "Recipiente pronto. Esteira bloqueada por temperatura."
                    : conveyorRunning ? "Recipiente pronto. Esteira retomada."
                    : "Recipiente pronto. Aguardando conexao.");
   }
