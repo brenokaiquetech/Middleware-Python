@@ -1,3 +1,5 @@
+# FUNDO E VISÃO: usa imagens sintéticas e relógio controlado para verificar rejeição do cenário e detecção de peças novas.
+# Execução: python -m unittest discover -s tests -v. Não precisa ligar motores.
 import unittest
 from unittest.mock import patch
 
@@ -11,7 +13,9 @@ cv2 = vision.cv2
 np = vision.np
 
 
+# Agrupa cenários deste componente; cada assert compara o resultado com a regra esperada.
 class BackgroundTests(unittest.TestCase):
+    # Prepara um cenário isolado antes de cada teste; patches são restaurados para não contaminar os demais.
     def setUp(self):
         self.now = 0.0
         self.settings = patch.multiple(
@@ -24,6 +28,7 @@ class BackgroundTests(unittest.TestCase):
         self.filter = BackgroundFilter(clock=lambda: self.now)
         self.empty = np.full((120, 160, 3), 60, dtype=np.uint8)
 
+    # Fornece quadros e avança o relógio até cumprir as condições do aprendizado do fundo.
     def learn(self, frame):
         self.assertIsNone(self.filter.foreground_mask(frame))
         self.now = 1.0
@@ -32,6 +37,7 @@ class BackgroundTests(unittest.TestCase):
         self.assertFalse(self.filter.foreground_mask(frame).any())
         self.assertTrue(self.filter.ready)
 
+    # O cenário colorido já presente no início deve permanecer fora das detecções.
     def test_startup_scene_is_ignored(self):
         frame = self.empty.copy()
         frame[20:60, 30:70] = (0, 140, 255)
@@ -39,6 +45,7 @@ class BackgroundTests(unittest.TestCase):
         self.now += 10
         self.assertFalse(self.filter.foreground_mask(frame).any())
 
+    # Uma peça colocada após o aprendizado deve continuar visível mesmo quando fica parada.
     def test_new_stationary_piece_is_not_absorbed_into_background(self):
         self.learn(self.empty)
         frame = self.empty.copy()
@@ -48,17 +55,20 @@ class BackgroundTests(unittest.TestCase):
             self.assertEqual(self.filter.foreground_mask(frame)[40, 50], 255)
         self.assertFalse(self.filter.foreground_mask(self.empty).any())
 
+    # Pequenas variações de pixel não devem ser aceitas como um objeto novo.
     def test_small_image_noise_does_not_become_foreground(self):
         self.learn(self.empty)
         frame = self.empty + 5
         self.assertFalse(self.filter.foreground_mask(frame).any())
 
+    # Uma imagem com dimensões novas precisa reaprender seu próprio fundo.
     def test_resolution_change_requires_new_background(self):
         self.learn(self.empty)
         resized = cv2.resize(self.empty, (80, 60))
         self.assertIsNone(self.filter.foreground_mask(resized))
         self.assertFalse(self.filter.ready)
 
+    # Tempo decorrido sem quadros suficientes não pode concluir o aprendizado.
     def test_video_pause_does_not_finish_capture_with_only_two_frames(self):
         self.assertIsNone(self.filter.foreground_mask(self.empty))
         self.now = 30.0
@@ -69,7 +79,9 @@ class BackgroundTests(unittest.TestCase):
         self.assertTrue(self.filter.ready)
 
 
+# Agrupa cenários deste componente; cada assert compara o resultado com a regra esperada.
 class BackgroundDetectionTests(unittest.TestCase):
+    # Prepara um cenário isolado antes de cada teste; patches são restaurados para não contaminar os demais.
     def setUp(self):
         BackgroundTests.setUp(self)
         for attribute, value in (
@@ -81,21 +93,25 @@ class BackgroundDetectionTests(unittest.TestCase):
             replacement.start()
             self.addCleanup(replacement.stop)
 
+    # Converte um matiz HSV em pixel BGR para produzir cores sintéticas reconhecíveis pelo detector.
     def color(self, hue):
         return cv2.cvtColor(np.uint8([[[hue, 220, 220]]]), cv2.COLOR_HSV2BGR)[0, 0]
 
+    # Cria uma cena artificial com as cores dos materiais para exercitar o filtro de fundo.
     def scene(self):
         frame = self.empty.copy()
         for x, hue in zip((10, 45, 80, 115), (15, 60, 100, 145)):
             frame[15:40, x:x + 22] = self.color(hue)
         return frame
 
+    # Aquece o detector com a cena de referência antes de testar a chegada de uma peça.
     def learn_scene(self, frame):
         for moment in (0.0, 1.0, 2.0):
             self.now = moment
             detections, _ = vision.detect_objects(frame)
             self.assertEqual(detections, [])
 
+    # As quatro cores do cenário inicial não podem gerar movimentos nem pesos.
     def test_background_of_all_material_colors_never_creates_commands_or_weights(self):
         frame = self.scene()
         sorter = SortingController()
@@ -111,6 +127,7 @@ class BackgroundDetectionTests(unittest.TestCase):
         self.assertIsNone(sorter.current_command())
         self.assertEqual(weights.snapshot()['pesoProcessadoGramas'], 0)
 
+    # Variação de exposição não deve transformar objetos fixos em materiais novos.
     def test_stationary_background_is_ignored_after_large_exposure_change(self):
         frame = self.scene()
         self.learn_scene(frame)
@@ -121,6 +138,7 @@ class BackgroundDetectionTests(unittest.TestCase):
         detections, _ = vision.detect_objects(darker)
         self.assertEqual(detections, [])
 
+    # A região de fundo ignorada deve continuar bloqueada após mudança de balanço de branco.
     def test_background_stays_ignored_when_white_balance_changes_its_color(self):
         frame = self.scene()
         self.learn_scene(frame)
@@ -128,6 +146,7 @@ class BackgroundDetectionTests(unittest.TestCase):
         detections, _ = vision.detect_objects(frame)
         self.assertEqual(detections, [])
 
+    # Uma peça nova gera um único ciclo e peso, preservando a exclusão do cenário.
     def test_new_piece_is_processed_once_while_background_stays_ignored(self):
         frame = self.scene()
         self.learn_scene(frame)
@@ -156,6 +175,7 @@ class BackgroundDetectionTests(unittest.TestCase):
             self.assertIsNone(sorter.current_command())
             self.assertEqual(weights.snapshot()['pesoProcessadoGramas'], processed)
 
+    # Mudança pequena em região já ignorada não basta para reconhecer uma nova peça.
     def test_small_change_on_existing_colored_region_is_not_a_new_piece(self):
         frame = self.empty.copy()
         frame[20:80, 30:100] = self.color(15)
@@ -164,6 +184,7 @@ class BackgroundDetectionTests(unittest.TestCase):
         detections, _ = vision.detect_objects(frame)
         self.assertEqual(detections, [])
 
+    # A área fora da ROI não participa da identificação, mesmo se houver uma cor válida.
     def test_new_piece_outside_roi_is_ignored(self):
         self.learn_scene(self.empty)
         frame = self.empty.copy()
@@ -172,6 +193,7 @@ class BackgroundDetectionTests(unittest.TestCase):
             detections, _ = vision.detect_objects(frame)
         self.assertEqual(detections, [])
 
+    # Recapturar limpa o resultado antigo sem reutilizar IDs que já foram contabilizados.
     def test_manual_capture_clears_detections_and_preserves_id_sequence(self):
         import app
 

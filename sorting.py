@@ -1,3 +1,5 @@
+# SEPARAÇÃO: transforma um ID confirmado em um único sort_cycle com posição e tempos.
+# Existe apenas o ciclo ativo; não há fila de peças aguardando a placa.
 """Converte novos IDs em comandos; não altera o algoritmo de visão."""
 import logging
 import threading
@@ -9,10 +11,13 @@ import config
 logger = logging.getLogger(__name__)
 
 
+# Mantém confirmações por ID, IDs já atendidos e no máximo um comando ativo.
 class SortingController:
+    # Carrega destinos e cria uma sessão; o relógio pode ser substituído nos testes.
     def __init__(self, targets=None, clock=time.monotonic):
         self.targets = config.SORT_TARGETS if targets is None else targets
         self.clock = clock
+        # A sessão muda ao reiniciar o processo; command_id distingue ciclos dentro dessa sessão.
         self.session_id = uuid.uuid4().hex
         self.lock = threading.Lock()
         self.confirmations = {}
@@ -23,6 +28,7 @@ class SortingController:
         self.thermal_blocked = False
         self.operation_enabled = True
 
+    # Exige a mesma cor em quadros consecutivos e gera um comando apenas para cores com destino.
     def observe(self, detections):
         """Chamado uma vez por frame, mesmo sem navegador aberto."""
         with self.lock:
@@ -32,6 +38,7 @@ class SortingController:
                     or not self.operation_enabled):
                 self.confirmations.clear()
                 return
+            # Se um ID desaparece, sua confirmação parcial é apagada e ele precisa confirmar de novo.
             present = {item['id'] for item in detections}
             self.confirmations = {
                 key: value for key, value in self.confirmations.items() if key in present
@@ -41,6 +48,7 @@ class SortingController:
                 color = item['color']
                 if track_id in self.handled_ids or color not in self.targets:
                     continue
+                # A cor deve permanecer igual por SORT_CONFIRM_FRAMES observações consecutivas do mesmo ID.
                 previous_color, count = self.confirmations.get(track_id, (color, 0))
                 count = count + 1 if previous_color == color else 1
                 self.confirmations[track_id] = (color, count)
@@ -49,6 +57,7 @@ class SortingController:
                 self.handled_ids.add(track_id)
                 self.confirmations.pop(track_id, None)
                 target = self.targets[color]
+                # Contrato do comando: identidade da sessão/peça, destino, ângulo e tempos em milissegundos.
                 command = {
                     'type': 'sort_cycle',
                     'session_id': self.session_id,
@@ -63,6 +72,7 @@ class SortingController:
                 self.active_created = self.clock()
                 break
 
+    # Reserva o canal de acionamento para uma placa; uma segunda conexão é recusada.
     def acquire_consumer(self):
         with self.lock:
             if self.consumer_connected:
@@ -70,22 +80,26 @@ class SortingController:
             self.consumer_connected = True
             return True
 
+    # Aplica a trava térmica e apaga confirmações parciais quando ela entra em vigor.
     def set_thermal_blocked(self, blocked):
         with self.lock:
             self.thermal_blocked = blocked
             if blocked:
                 self.confirmations.clear()
 
+    # Recebe a autorização da triagem e impede reaproveitar confirmações de uma pausa.
     def set_operation_enabled(self, enabled):
         with self.lock:
             self.operation_enabled = enabled
             if not enabled:
                 self.confirmations.clear()
 
+    # Libera a vaga da ESP32 depois de desconectar, permitindo uma nova conexão.
     def release_consumer(self):
         with self.lock:
             self.consumer_connected = False
 
+    # Devolve uma cópia do ciclo atual e descarta ciclos cujo prazo de confirmação expirou.
     def current_command(self):
         with self.lock:
             # Só existe o comando do ciclo atual, sem objetos aguardando.
@@ -97,6 +111,7 @@ class SortingController:
                 self.active_created = None
             return None
 
+    # Cancela só o ID indicado; allow_retry libera uma peça cujo comando ainda não foi enviado.
     def cancel_command(self, command_id, allow_retry=False):
         with self.lock:
             if self.active is not None and self.active['command_id'] == command_id:
@@ -106,6 +121,7 @@ class SortingController:
                 self.active = None
                 self.active_created = None
 
+    # Aceita done/error do comando ativo e libera o controlador para a próxima peça.
     def acknowledge(self, command_id, status):
         with self.lock:
             if self.active is None or self.active['command_id'] != command_id:
@@ -119,4 +135,5 @@ class SortingController:
             return True
 
 
+# Instância usada pela visão e pela comunicação; não cria threads nem conecta à placa sozinha.
 sorter = SortingController()

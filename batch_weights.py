@@ -1,3 +1,5 @@
+# PESAGEM SIMULADA: associa a cor ao material e sorteia gramas dentro de uma faixa.
+# Os totais ficam somente na memória deste processo; nenhuma balança ou backend é consultado.
 """Simula pesos por peça e lote conforme Lógica_Peso_Materiais.pdf.
 
 Todos os cálculos usam gramas inteiras; não são medições de uma balança.
@@ -9,14 +11,18 @@ import uuid
 
 import config
 
+# Limite de inteiros exatos também representáveis pelo JavaScript do dashboard.
 MAX_SAFE_INTEGER = 2**53 - 1
 
 
+# Distingue conflitos de estado do lote de erros no formato dos dados; a API usa HTTP 409.
 class BatchConflict(ValueError):
     pass
 
 
+# Acumula pesos e quantidades por material, sem ultrapassar o total informado para o lote.
 class BatchWeightSimulation:
+    # Valida faixas, prepara o gerador aleatório e cria as memórias de lotes e eventos já usados.
     def __init__(self, rng=None):
         self.rng = random.Random() if rng is None else rng
         self.ranges = dict(config.BATCH_WEIGHT_RANGES_G)
@@ -24,6 +30,7 @@ class BatchWeightSimulation:
             if (type(minimum) is not int or type(maximum) is not int
                     or not 0 < minimum <= maximum <= MAX_SAFE_INTEGER):
                 raise ValueError('Faixa de peso inválida em config.py.')
+        # O lock cobre leitura e atualização; métodos podem chamar snapshot mantendo o mesmo lock.
         self.lock = threading.RLock()
         self.session_id = uuid.uuid4().hex
         self.lot_id = None
@@ -39,6 +46,7 @@ class BatchWeightSimulation:
         # IDs já pesados pela câmera não são novamente pesados em outro lote.
         self.weighed_tracks = set()
 
+    # Valida ID e gramas; repetir o mesmo cadastro preserva pesos e outro lote exige conclusão do atual.
     def start_lot(self, lot_id, total_grams):
         if not isinstance(lot_id, str) or not lot_id.strip():
             raise ValueError('Identificador do lote inválido.')
@@ -66,6 +74,7 @@ class BatchWeightSimulation:
             self.last_piece = None
             return self.snapshot()
 
+    # Valida o evento, evita duplicatas e atribui à peça um peso limitado ao saldo restante.
     def account_piece(self, event):
         if not isinstance(event, dict):
             raise ValueError('Envie um objeto JSON com eventoId e material.')
@@ -85,16 +94,20 @@ class BatchWeightSimulation:
                 return {'sucesso': False, 'motivo': 'LOTE_ENCERRADO'}
             remaining = self.total - self.processed
             minimum, maximum = self.ranges[material]
+            # Se o saldo não comporta o mínimo do material, atribui todo o saldo à última peça.
             if remaining < minimum:
                 weight = remaining
                 calculation = 'AJUSTE_SALDO'
             else:
+                # O máximo do sorteio é limitado ao saldo para nunca ultrapassar o peso total.
                 weight = self.rng.randint(minimum, min(maximum, remaining))
                 calculation = 'ALEATORIO'
+            # Atualiza total, subtotal e quantidade juntos para manter as somas coerentes entre threads.
             self.processed += weight
             self.totals[material] += weight
             self.quantities[material] += 1
             self.processed_events.add(event_id)
+            # O lote encerra exatamente em seu total, sem arredondamento em quilogramas.
             if self.processed == self.total:
                 self.status = 'CONCLUIDO'
             self.last_piece = {
@@ -106,6 +119,7 @@ class BatchWeightSimulation:
             }
             return {'sucesso': True, **self.snapshot(), **self.last_piece}
 
+    # Converte um ID da câmera confirmado em evento de pesagem e impede repetir esse ID em outro lote.
     def observe(self, detections):
         """Pesa uma vez por ID confirmado, independentemente da ESP32/site."""
         with self.lock:
@@ -136,6 +150,7 @@ class BatchWeightSimulation:
                 if self.status == 'CONCLUIDO':
                     break
 
+    # Retorna cópias dos totais e da última peça para o chamador não modificar o estado interno.
     def snapshot(self):
         with self.lock:
             return {
@@ -152,4 +167,5 @@ class BatchWeightSimulation:
             }
 
 
+# Memória única do lote durante esta execução do Python; não há persistência em banco.
 batch_weights = BatchWeightSimulation()

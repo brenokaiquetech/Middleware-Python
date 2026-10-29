@@ -1,3 +1,5 @@
+# TEMPERATURA: usa relógio falso para verificar aquecimento, resfriamento e validade da telemetria.
+# Execução: python -m unittest discover -s tests -v. Não precisa ligar motores.
 import unittest
 from unittest.mock import patch
 
@@ -6,12 +8,15 @@ from temperature import TemperatureSimulation
 import app
 
 
+# Agrupa cenários deste componente; cada assert compara o resultado com a regra esperada.
 class TemperatureTests(unittest.TestCase):
+    # Prepara um cenário isolado antes de cada teste; patches são restaurados para não contaminar os demais.
     def setUp(self):
         self.now = 0.0
         with patch.object(config, 'TEMP_STATE_TIMEOUT_SECONDS', 10000):
             self.sim = TemperatureSimulation(clock=lambda: self.now)
 
+    # Temperatura e duração ligada crescem pelo tempo decorrido, não pela quantidade de consultas.
     def test_heats_by_elapsed_time_and_counts_continuous_run(self):
         self.sim.report(True)
         self.now = 10
@@ -21,6 +26,7 @@ class TemperatureTests(unittest.TestCase):
         self.assertTrue(data['simulated'])
         self.assertTrue(data['state_known'])
 
+    # Parar preserva o calor acumulado, mas zera o contador de funcionamento consecutivo.
     def test_cools_without_resetting_heat_and_restarts_run_counter(self):
         self.sim.report(True)
         self.now = 20
@@ -36,6 +42,7 @@ class TemperatureTests(unittest.TestCase):
         self.assertEqual(self.sim.snapshot()['continuous_run_seconds'], 2)
         self.assertAlmostEqual(self.sim.snapshot()['temperature_c'], cooled + 2 * self.sim.heating, places=2)
 
+    # Longos intervalos não podem ultrapassar o teto nem resfriar abaixo do ambiente.
     def test_limits_temperature_to_ambient_and_maximum(self):
         self.sim.report(True)
         self.now = 1000
@@ -44,6 +51,7 @@ class TemperatureTests(unittest.TestCase):
         self.now = 3000
         self.assertEqual(self.sim.snapshot()['temperature_c'], self.sim.ambient)
 
+    # Consultas e relatórios repetidos não duplicam aquecimento nem reiniciam duração ligada.
     def test_sampling_and_repeated_telemetry_do_not_reset_runtime(self):
         with patch.object(config, 'TEMP_STATE_TIMEOUT_SECONDS', 10000):
             other = TemperatureSimulation(clock=lambda: self.now)
@@ -57,6 +65,7 @@ class TemperatureTests(unittest.TestCase):
         self.assertEqual(self.sim.snapshot()['temperature_c'], other.snapshot()['temperature_c'])
         self.assertEqual(self.sim.snapshot()['continuous_run_seconds'], 10)
 
+    # Após vencer a telemetria, só conta calor até o prazo e depois aplica resfriamento.
     def test_missing_telemetry_switches_to_cooling_at_timeout(self):
         self.sim.timeout = 3
         self.sim.report(True)
@@ -67,6 +76,7 @@ class TemperatureTests(unittest.TestCase):
         self.assertEqual(data['continuous_run_seconds'], 0)
         self.assertAlmostEqual(data['temperature_c'], self.sim.ambient + 3 * self.sim.heating - self.sim.cooling, places=2)
 
+    # Desconectar marca estado desconhecido e estados não booleanos são recusados.
     def test_disconnect_cools_and_invalid_state_is_rejected(self):
         self.sim.report(True)
         self.now = 10
@@ -80,7 +90,9 @@ class TemperatureTests(unittest.TestCase):
             self.sim.report('true')
 
 
+# Agrupa cenários deste componente; cada assert compara o resultado com a regra esperada.
 class DashboardStateTests(unittest.TestCase):
+    # O painel mostra referência ligado, zero parado e null sem estado recente.
     def test_speed_is_estimated_only_when_motor_state_is_known(self):
         for known, running, expected in [(True, True, .23), (True, False, 0), (False, False, None)]:
             with self.subTest(known=known, running=running):

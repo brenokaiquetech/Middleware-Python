@@ -1,3 +1,5 @@
+# EXPORTAÇÃO: converte os ajustes Python em constantes C++ para os dois sketches.
+# Alterações destinadas à placa só entram em uso após gerar, compilar e regravar o firmware.
 """Gera as constantes C++ da placa a partir de config.py, sem dependências extras."""
 import json
 import math
@@ -5,10 +7,12 @@ from pathlib import Path
 
 import config
 
+# Resolve a pasta pelo próprio script para funcionar mesmo se o terminal estiver em outro diretório.
 OUTPUT_PATH = Path(__file__).resolve().parent / 'esp32' / 'EcoCycleClient' / 'EcoCycleConfig.h'
 SERVO_TEST_OUTPUT_PATH = OUTPUT_PATH.parents[1] / 'TesteServo' / 'EcoCycleConfig.h'
 
 
+# Valida curso/ângulos/pinos e monta constantes C++; o teste isolado pode omitir credenciais de rede.
 def build_header(include_network=True):
     travel = config.SERVO_TRAVEL_DEG
     if (not isinstance(travel, (int, float)) or isinstance(travel, bool)
@@ -23,8 +27,13 @@ def build_header(include_network=True):
         '#pragma once',
         '// GERADO a partir de config.py. Edite config.py, nao este arquivo.',
         '// Apos gerar novamente, recompile e reenvie o firmware para a ESP32.',
+        '// Rede: credenciais e destino WebSocket so no cliente; o diagnostico omite credenciais.',
+        '// GPIOs: numeros dos pinos; servo: frequencia em Hz, pulsos em us e curso em graus.',
+        '// Tempos: constantes terminadas em MS usam milissegundos; SERIAL_BAUD e a taxa do monitor.',
+        '// Habilitacoes e sentido sao booleanos. Constantes nao medem o estado fisico dos motores.',
         '',
     ]
+    # json.dumps escapa aspas e barras para que SSID/senha gerem strings C++ válidas.
     strings = {
         'WIFI_SSID': config.ESP32_WIFI_SSID,
         'WIFI_PASSWORD': config.ESP32_WIFI_PASSWORD,
@@ -33,6 +42,7 @@ def build_header(include_network=True):
     } if include_network else {}
     for name, value in strings.items():
         lines.append(f'constexpr const char* {name} = {json.dumps(value, ensure_ascii=False)};')
+    # UL indica unsigned long em C++; tempos são milissegundos e pinos são números GPIO.
     integers = {
         'SERVER_PORT': config.PORT,
         'SERVO_PIN': config.SERVO_PIN,
@@ -61,11 +71,13 @@ def build_header(include_network=True):
         f'constexpr float SERVO_TRAVEL_DEG = {float(config.SERVO_TRAVEL_DEG)!r}f;',
         '',
     ])
+    # Cada função elétrica usa seu próprio GPIO; o gerador recusa pinos compartilhados.
     if len({config.SERVO_PIN, config.CONVEYOR_PIN_IA, config.CONVEYOR_PIN_IB}) != 3:
         raise ValueError('SERVO_PIN e os dois pinos da esteira devem ser diferentes.')
     return '\n'.join(lines)
 
 
+# Grava o header só quando o conteúdo mudou, preservando a data de arquivos idênticos.
 def write_esp32_config(path=OUTPUT_PATH, include_network=True):
     path = Path(path)
     source = build_header(include_network=include_network)
@@ -75,10 +87,12 @@ def write_esp32_config(path=OUTPUT_PATH, include_network=True):
     return path
 
 
+# Gera tanto a configuração do cliente principal quanto a do diagnóstico sem Wi-Fi.
 def write_esp32_configs():
     return write_esp32_config(), write_esp32_config(SERVO_TEST_OUTPUT_PATH, include_network=False)
 
 
+# Rodar este script só exporta arquivos: não abre servidor e não envia firmware à ESP32.
 if __name__ == '__main__':
     for path in write_esp32_configs():
         print(f'Configuração ESP32 gerada: {path}')

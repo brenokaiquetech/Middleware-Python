@@ -1,3 +1,5 @@
+# PESO SIMULADO: testa faixas, saldo final, duplicatas, concorrência e as rotas HTTP de lote/peça.
+# Execução: python -m unittest discover -s tests -v. Não precisa ligar motores.
 from concurrent.futures import ThreadPoolExecutor
 import random
 import unittest
@@ -8,18 +10,23 @@ import config
 from batch_weights import BatchConflict, BatchWeightSimulation
 
 
+# Agrupa cenários deste componente; cada assert compara o resultado com a regra esperada.
 class BatchWeightTests(unittest.TestCase):
+    # Prepara um cenário isolado antes de cada teste; patches são restaurados para não contaminar os demais.
     def setUp(self):
         self.rng = Mock()
         self.sim = BatchWeightSimulation(rng=self.rng)
 
+    # Cria o evento mínimo de uma peça para chamar diretamente o simulador de peso.
     def piece(self, event_id, material='PLASTICO'):
         return self.sim.account_piece({'eventoId': event_id, 'material': material})
 
+    # Repete observações pelo número de quadros exigido para simular uma peça estável na câmera.
     def confirm(self, track_id, color='Laranja'):
         for _ in range(config.SORT_CONFIRM_FRAMES):
             self.sim.observe([{'id': track_id, 'color': color}])
 
+    # Reproduz o saldo de 80 g do documento e fecha o lote sem ultrapassar o total.
     def test_pdf_example_remaining_eighty_grams(self):
         self.sim.start_lot('LOTE-001', 1000)
         self.rng.randint.side_effect = [300, 620]
@@ -36,6 +43,7 @@ class BatchWeightTests(unittest.TestCase):
         self.assertEqual(result['quantidades']['PLASTICO'], 2)
         self.assertEqual(self.rng.randint.call_count, 2)
 
+    # O sorteio inclui os extremos e limita o máximo ao saldo que resta no lote.
     def test_ranges_are_inclusive_and_limited_to_balance(self):
         self.sim.start_lot('LOTE-001', 250)
         self.rng.randint.return_value = 250
@@ -44,6 +52,7 @@ class BatchWeightTests(unittest.TestCase):
         self.assertEqual(result['tipoCalculo'], 'ALEATORIO')
         self.assertEqual(result['statusLote'], 'CONCLUIDO')
 
+    # Saldo igual ao mínimo ainda usa o sorteio, sem classificar como ajuste final.
     def test_balance_equal_to_minimum_is_not_adjusted(self):
         self.sim.start_lot('L', 100)
         self.rng.randint.return_value = 100
@@ -51,6 +60,7 @@ class BatchWeightTests(unittest.TestCase):
         self.rng.randint.assert_called_once_with(100, 100)
         self.assertEqual(result['tipoCalculo'], 'ALEATORIO')
 
+    # Um lote menor que a faixa do material usa todo o saldo sem chamar o gerador aleatório.
     def test_tiny_lot_is_closed_by_adjustment(self):
         self.sim.start_lot('L', 1)
         result = self.piece('E')
@@ -59,6 +69,7 @@ class BatchWeightTests(unittest.TestCase):
         self.assertEqual(result['saldoLoteGramas'], 0)
         self.rng.randint.assert_not_called()
 
+    # Eventos repetidos ou posteriores ao encerramento não alteram as somas.
     def test_duplicate_and_closed_lot_never_change_totals(self):
         self.sim.start_lot('L', 100)
         self.rng.randint.return_value = 100
@@ -69,6 +80,7 @@ class BatchWeightTests(unittest.TestCase):
         self.assertEqual(self.sim.snapshot(), before)
         self.rng.randint.assert_called_once()
 
+    # Uma sequência de materiais mantém subtotais e quantidades coerentes até o fechamento exato.
     def test_all_materials_never_exceed_lot_total(self):
         sim = BatchWeightSimulation(rng=random.Random(7))
         sim.start_lot('L', 10000)
@@ -89,6 +101,7 @@ class BatchWeightTests(unittest.TestCase):
                 break
         self.assertEqual(sim.snapshot()['pesoProcessadoGramas'], 10000)
 
+    # Rejeita pesos/IDs inválidos e preserva o progresso quando o mesmo cadastro é repetido.
     def test_lot_validation_and_repeated_registration(self):
         for invalid in (0, -1, 1.5, True, '1000', 2**53, None):
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):
@@ -106,6 +119,7 @@ class BatchWeightTests(unittest.TestCase):
         with self.assertRaises(BatchConflict):
             self.sim.start_lot('L2', 1000)
 
+    # Um lote seguinte limpa seus próprios totais e não pode reutilizar um ID já concluído.
     def test_new_lot_requires_new_id_and_resets_subtotals(self):
         self.sim.start_lot('L1', 1)
         self.piece('E')
@@ -116,6 +130,7 @@ class BatchWeightTests(unittest.TestCase):
         with self.assertRaises(BatchConflict):
             self.sim.start_lot('L1', 1)
 
+    # Sem lote ou com evento incompleto, não deve haver contabilização de peso.
     def test_incomplete_events_and_no_lot(self):
         self.assertEqual(self.piece('E')['motivo'], 'LOTE_NAO_CONFIGURADO')
         for event in (None, [], {}, {'eventoId': ''}, {'eventoId': 1, 'material': 'PLASTICO'},
@@ -123,6 +138,7 @@ class BatchWeightTests(unittest.TestCase):
             with self.subTest(event=event), self.assertRaises(ValueError):
                 self.sim.account_piece(event)
 
+    # O simulador isolado pesa cada ID uma única vez sem depender do hardware.
     def test_camera_weights_each_confirmed_track_once_without_esp32(self):
         self.sim.start_lot('L', 5000)
         self.rng.randint.side_effect = lambda low, high: low
@@ -134,6 +150,7 @@ class BatchWeightTests(unittest.TestCase):
             self.assertEqual(self.sim.snapshot()['quantidades'][material], 1)
         self.assertEqual(sum(self.sim.snapshot()['quantidades'].values()), 4)
 
+    # Uma observação curta que desaparece antes da confirmação não deve criar peso.
     def test_camera_noise_does_not_create_weight(self):
         self.sim.start_lot('L', 1000)
         for _ in range(config.SORT_CONFIRM_FRAMES - 1):
@@ -143,6 +160,7 @@ class BatchWeightTests(unittest.TestCase):
         self.assertEqual(self.sim.snapshot()['pesoProcessadoGramas'], 0)
         self.rng.randint.assert_not_called()
 
+    # Trocar o lote não permite pesar novamente o mesmo ID ainda visível.
     def test_same_camera_object_is_not_reweighed_in_next_lot(self):
         self.sim.start_lot('L1', 1)
         self.confirm(1)
@@ -152,6 +170,7 @@ class BatchWeightTests(unittest.TestCase):
         self.confirm(2)
         self.assertEqual(self.sim.snapshot()['statusLote'], 'CONCLUIDO')
 
+    # Requisições concorrentes do mesmo evento precisam resultar em uma única peça.
     def test_concurrent_duplicate_events_are_counted_once(self):
         self.sim.start_lot('L', 10000)
         self.rng.randint.return_value = 100
@@ -161,6 +180,7 @@ class BatchWeightTests(unittest.TestCase):
         self.assertEqual(self.sim.snapshot()['pesoProcessadoGramas'], 100)
         self.rng.randint.assert_called_once()
 
+    # Alterar o snapshot recebido não pode modificar o estado interno do simulador.
     def test_summary_cannot_be_used_to_mutate_internal_totals(self):
         self.sim.start_lot('L', 1000)
         data = self.sim.snapshot()
@@ -168,7 +188,9 @@ class BatchWeightTests(unittest.TestCase):
         self.assertEqual(self.sim.snapshot()['totaisPorMaterial']['PLASTICO'], 0)
 
 
+# Casos da API HTTP: cliente Flask em memória, com controladores substituídos por instâncias de teste.
 class BatchApiTests(unittest.TestCase):
+    # Prepara um cenário isolado antes de cada teste; patches são restaurados para não contaminar os demais.
     def setUp(self):
         self.sim = BatchWeightSimulation(rng=random.Random(2))
         self.patch = patch.object(app, 'batch_weights', self.sim)
@@ -176,6 +198,7 @@ class BatchApiTests(unittest.TestCase):
         self.addCleanup(self.patch.stop)
         self.client = app.app.test_client()
 
+    # Exercita cadastro, consulta, peça simulada e rejeição de duplicata pelas rotas HTTP.
     def test_register_read_and_account_piece(self):
         response = self.client.post('/api/lote', json={'loteId': 'L', 'pesoTotalLoteGramas': 80})
         self.assertEqual(response.status_code, 200)
@@ -188,6 +211,7 @@ class BatchApiTests(unittest.TestCase):
         self.assertEqual(self.client.post('/api/lote/pecas', json=event).status_code, 409)
         self.assertEqual(self.client.get('/api/detections').json['batch']['pesoProcessadoGramas'], 80)
 
+    # A API distingue dados inválidos (400) de conflitos com o lote atual (409).
     def test_invalid_payloads_and_conflicts(self):
         self.assertEqual(self.client.get('/api/lote').json['statusLote'], 'AGUARDANDO_LOTE')
         self.assertEqual(self.client.post('/api/lote', json=[]).status_code, 400)

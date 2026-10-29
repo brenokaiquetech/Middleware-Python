@@ -1,3 +1,5 @@
+# TEMPERATURA SIMULADA: integra aquecimento/resfriamento pelo tempo e pela telemetria.
+# A trava térmica fica ativa até liberação manual, mesmo depois de esfriar.
 """Temperatura fictícia calculada pelo tempo no estado ligado/desligado."""
 import threading
 import time
@@ -6,7 +8,9 @@ import math
 import config
 
 
+# Modelo térmico fictício associado ao estado de transporte informado pela ESP32.
 class TemperatureSimulation:
+    # Valida limites e taxas e começa na temperatura ambiente, ainda sem telemetria.
     def __init__(self, clock=time.monotonic):
         self.clock = clock
         self.ambient = config.TEMP_AMBIENT_C
@@ -25,6 +29,7 @@ class TemperatureSimulation:
             raise ValueError('Configuração de temperatura simulada inválida.')
         self.lock = threading.Lock()
         self.value = self.ambient
+        # monotonic mede intervalos sem ser afetado por mudança no relógio de data/hora do computador.
         self.updated_at = self.clock()
         self.last_report = None
         self.running = False
@@ -33,12 +38,14 @@ class TemperatureSimulation:
         self.last_thermal_report = None
         self.awaiting_device_interlock = True
 
+    # Aplica taxa × segundos, limita a temperatura e arma a trava ao alcançar o valor crítico.
     def _integrate(self, seconds):
         rate = self.heating if self.running else -self.cooling
         self.value = min(self.maximum, max(self.ambient, self.value + rate * seconds))
         if self.value >= self.critical:
             self.thermal_blocked = True
 
+    # Avança o tempo sem contar calor duas vezes; telemetria vencida muda a simulação para resfriamento.
     def _advance(self, now):
         # Integre até o último estado válido; depois esfrie se a telemetria sumir.
         if self.running and self.last_report is not None:
@@ -51,6 +58,7 @@ class TemperatureSimulation:
         self._integrate(max(0, now - self.updated_at))
         self.updated_at = now
 
+    # Atualiza o estado ligado/parado e recupera o bloqueio da placa na primeira telemetria da conexão.
     def report(self, running, thermal_blocked=None):
         if not isinstance(running, bool):
             raise ValueError('O estado da esteira deve ser booleano.')
@@ -64,11 +72,13 @@ class TemperatureSimulation:
             self.running = running
             self.last_report = now
             if isinstance(thermal_blocked, bool):
+                # Na reconexão, recupera a trava da placa; relatórios atrasados não anulam uma liberação já feita.
                 if self.awaiting_device_interlock and thermal_blocked:
                     self.thermal_blocked = True
                 self.awaiting_device_interlock = False
                 self.last_thermal_report = thermal_blocked
 
+    # Integra o intervalo válido, passa a resfriar e preserva uma trava térmica já existente.
     def disconnect(self):
         with self.lock:
             self._advance(self.clock())
@@ -78,6 +88,7 @@ class TemperatureSimulation:
             self.last_thermal_report = None
             self.awaiting_device_interlock = True
 
+    # Só libera após esfriar e receber confirmação recente de parada com bloqueio na ESP32.
     def release_thermal_block(self):
         """Liberação humana após esfriar; o resfriamento sozinho não religa."""
         with self.lock:
@@ -93,6 +104,7 @@ class TemperatureSimulation:
                 raise ValueError('Aguarde a confirmação da parada térmica pela ESP32.')
             self.thermal_blocked = False
 
+    # Avança a simulação e informa temperatura, duração ligada e condições da liberação manual.
     def snapshot(self):
         with self.lock:
             now = self.clock()
@@ -112,9 +124,11 @@ class TemperatureSimulation:
                 'conveyor_running': self.running,
                 'continuous_run_seconds': round(now - self.running_since, 1)
                 if self.running_since is not None else 0.0,
+                # Estado conhecido exige telemetria recente; ausência de informação não significa motor confirmado parado.
                 'state_known': self.last_report is not None
                 and now - self.last_report <= self.timeout,
             }
 
 
+# A mesma simulação atende a API e o loop WebSocket, mesmo quando o navegador está fechado.
 temperature = TemperatureSimulation()

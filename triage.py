@@ -1,3 +1,5 @@
+# OPERAÇÃO: coordena seleção, início, pausa e conclusão do lote.
+# Relaciona os controladores de peso, separação e temperatura; não faz reconhecimento de imagem.
 """Seleção do lote e autorização explícita do operador para ligar a esteira."""
 import math
 import threading
@@ -9,7 +11,9 @@ from sorting import sorter
 from temperature import temperature
 
 
+# Guarda o lote escolhido e a autorização explícita de funcionamento da operação.
 class TriageController:
+    # Valida o catálogo, cria o lock reentrante e inicia a separação sem autorização de operação.
     def __init__(self, batches, sorting, thermal, catalog=None, clock=time.monotonic):
         self.batches = batches
         self.sorting = sorting
@@ -27,6 +31,7 @@ class TriageController:
         if not math.isfinite(self.finish_seconds) or self.finish_seconds < 0:
             raise ValueError('BATCH_FINISH_RUN_SECONDS deve ser finito e não negativo.')
         self.clock = clock
+        # RLock permite que um método chame outro que também usa o mesmo lock, como select → snapshot.
         self.lock = threading.RLock()
         self.selected = None
         self.started = False
@@ -36,19 +41,23 @@ class TriageController:
         self.device_ready = False
         self.sorting.set_operation_enabled(False)
 
+    # Registra o handshake da placa; a perda de conexão interrompe a contagem do transporte final.
     def set_device_ready(self, ready):
         with self.lock:
             self.device_ready = ready
             if not ready:
                 self.finish_since = None
 
+    # Ao fechar o peso do lote, aguarda o ciclo ativo e o transporte final antes de desautorizar o motor.
     def _refresh(self):
         batch = self.batches.snapshot()
         if self.selected and self.selected['loteId'] == batch['loteId']:
             self.selected['pesoTotalLoteGramas'] = batch['pesoTotalLoteGramas']
+        # Fechar o peso interrompe novas peças; a última ainda precisa completar o movimento e o transporte.
         if self.started and batch['statusLote'] == 'CONCLUIDO':
             self.sorting.set_operation_enabled(False)
             motor = self.thermal.snapshot()
+            # Sem ACK, conexão, telemetria ligada ou com calor, o período final precisa ser contado novamente.
             if (self.sorting.current_command() is not None or not self.device_ready
                     or not motor['state_known'] or not motor['conveyor_running']
                     or motor['thermal_blocked']):
@@ -64,10 +73,12 @@ class TriageController:
                     self.finish_since = None
         return batch
 
+    # Calcula a etapa atual e o motivo que permite ou impede o botão Iniciar triagem.
     def snapshot(self):
         with self.lock:
             batch = self._refresh()
             motor = self.thermal.snapshot()
+            # A etapa exibida é derivada do estado interno; não depende de uma página permanecer aberta.
             if self.selected is None:
                 stage = 'AGUARDANDO_LOTE'
             elif self.finished:
@@ -103,6 +114,7 @@ class TriageController:
                 'start_reason': reason,
             }
 
+    # Combina o catálogo com o lote cadastrado pela API e marca concluídos, ativos e selecionáveis.
     def available_lots(self):
         with self.lock:
             batch = self._refresh()
@@ -120,9 +132,11 @@ class TriageController:
                 done = item['loteId'] in used and not active
                 other_active = batch['statusLote'] == 'EM_PROCESSAMENTO' and not active
                 item['status'] = 'CONCLUIDO' if done else 'EM_ANDAMENTO' if active else 'SELECIONADO' if same else 'DISPONIVEL'
+                # Só há um lote em processamento; escolher outro não pode abandonar silenciosamente o atual.
                 item['can_select'] = same or not (done or other_active or self.started)
             return items
 
+    # Reserva um lote permitido; trocar a seleção não cadastra pesos nem inicia o motor.
     def select(self, lot_id):
         with self.lock:
             item = next((item for item in self.available_lots() if item['loteId'] == lot_id), None)
@@ -138,6 +152,7 @@ class TriageController:
             self.finish_since = None
             return self.snapshot()
 
+    # Confere a seleção, inicia/retoma o mesmo lote e habilita a criação de comandos.
     def start(self, lot_id):
         with self.lock:
             state = self.snapshot()
@@ -153,6 +168,7 @@ class TriageController:
             self.finish_since = None
             return self.snapshot()
 
+    # Desabilita novos comandos preservando seleção e pesos para uma retomada posterior.
     def pause(self):
         with self.lock:
             self.started = False
@@ -160,6 +176,7 @@ class TriageController:
             self.finish_since = None
             return self.snapshot()
 
+    # Libera contabilização e comandos somente durante operação válida e com telemetria recente.
     def processing_allowed(self):
         with self.lock:
             batch = self._refresh()
@@ -168,4 +185,5 @@ class TriageController:
                     and self.device_ready and motor['state_known'] and not motor['thermal_blocked'])
 
 
+# Instância compartilhada: app.py, vision.py e WebSocket consultam esta mesma operação.
 triage = TriageController(batch_weights, sorter, temperature)

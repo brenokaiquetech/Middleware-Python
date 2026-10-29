@@ -1,6 +1,10 @@
 #pragma once
 // GERADO a partir de config.py. Edite config.py, nao este arquivo.
 // Apos gerar novamente, recompile e reenvie o firmware para a ESP32.
+// Rede: credenciais e destino WebSocket so no cliente; o diagnostico omite credenciais.
+// GPIOs: numeros dos pinos; servo: frequencia em Hz, pulsos em us e curso em graus.
+// Tempos: constantes terminadas em MS usam milissegundos; SERIAL_BAUD e a taxa do monitor.
+// Habilitacoes e sentido sao booleanos. Constantes nao medem o estado fisico dos motores.
 
 constexpr unsigned long SERVER_PORT = 8000UL;
 constexpr unsigned long SERVO_PIN = 18UL;

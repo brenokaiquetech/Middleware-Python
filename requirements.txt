@@ -1,5 +1,10 @@
+# Servidor HTTP: paginas, video MJPEG e API JSON.
 Flask>=3.0
+# Adiciona as rotas WebSocket ao mesmo servidor Flask.
 flask-sock>=0.7,<1
+# Visao: conversao HSV, mascaras, contornos, desenho e codificacao JPEG.
 opencv-python>=4.8
+# Arrays de pixels e operacoes numericas usadas pela visao.
 numpy>=1.24
+# Cliente HTTP que le o fluxo de video da camera IP.
 requests>=2.31

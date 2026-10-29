@@ -1,20 +1,25 @@
+// TESTE DO FIRMWARE REAL EM C++: inclui o .ino e troca apenas periféricos/relógio por fakes.
+// As asserções verificam pinos, pulsos, estados e JSON; não simulam a mecânica ou a eletricidade.
 // Compilar com C++17, fakes/ e a biblioteca ArduinoJson 7 nos includes.
 // Inclui o firmware de produção; somente os periféricos e o relógio são falsos.
 #include <cassert>
 #include <iostream>
 #include "../../esp32/EcoCycleClient/EcoCycleClient.ino"
 
+// Entrega um JSON diretamente ao mesmo callback usado pelo WebSocket no hardware.
 void receive(const std::string& text) {
   onWebSocketEvent(WStype_TEXT,
                   reinterpret_cast<uint8_t*>(const_cast<char*>(text.data())), text.size());
 }
 
+// Simula a mensagem inicial do servidor com autorização configurável da triagem.
 void hello(bool enabled = true) {
   receive(enabled
     ? R"({"type":"hello","session_id":"test","thermal_blocked":false,"triage_enabled":true})"
     : R"({"type":"hello","session_id":"test","thermal_blocked":false,"triage_enabled":false})");
 }
 
+// Monta um sort_cycle com identidade, ângulo e intervalos usados pelos cenários.
 void cycle(const char* id, float angle = 90) {
   JsonDocument message;
   message["type"] = "sort_cycle";
@@ -28,14 +33,17 @@ void cycle(const char* id, float angle = 90) {
   receive(text);
 }
 
+// Avança o relógio falso e executa loop, dispensando espera real de segundos.
 void advance(uint32_t elapsed) { fakeNow += elapsed; loop(); }
 
+// Confere tanto a variável de software quanto o nível aplicado a cada entrada do L9110S.
 void assertMotor(bool running) {
   assert(conveyorRunning == running);
   assert(pinStates[CONVEYOR_PIN_IA] == (running && CONVEYOR_FORWARD_IA_HIGH ? HIGH : LOW));
   assert(pinStates[CONVEYOR_PIN_IB] == (running && !CONVEYOR_FORWARD_IA_HIGH ? HIGH : LOW));
 }
 
+// Decodifica a última mensagem enviada e compara ID, resultado e estado do motor.
 void assertAck(const char* id, const char* status) {
   JsonDocument message;
   assert(!deserializeJson(message, webSocket.sent.back()));
@@ -45,6 +53,7 @@ void assertAck(const char* id, const char* status) {
   assert(message["conveyor_running"].as<bool>() == conveyorRunning);
 }
 
+// Executa cenários sucessivos sobre o mesmo firmware: partida, ciclo, duplicação e bloqueios.
 int main() {
   assert(SERVO_CALIBRATED && CONVEYOR_ENABLED);
   setup();
@@ -66,6 +75,7 @@ int main() {
   assert(plateServo.pulses.empty());
   std::cout << "PASS: partida e transporte continuo sem deteccoes\n";
 
+  // O primeiro ciclo usa o fim do curso: o pulso esperado deve ser exatamente SERVO_MAX_US.
   cycle("first", SERVO_TRAVEL_DEG);
   assertMotor(false);
   advance(199);
@@ -82,6 +92,7 @@ int main() {
   assertMotor(true);
   std::cout << "PASS: parada de 200 ms, servo, espera de 1500 ms e retomada\n";
 
+  // A quantidade de pulsos permite descobrir se uma mensagem repetida movimentou o servo novamente.
   auto moves = plateServo.pulses.size();
   cycle("first", SERVO_TRAVEL_DEG);
   assertMotor(true);
@@ -99,6 +110,7 @@ int main() {
   assertAck("upper-half", "done");
   std::cout << "PASS: posicao em 75% do curso usa a metade superior dos pulsos\n";
 
+  // Um ângulo além do curso precisa ser rejeitado sem congelar o transporte.
   cycle("invalid", SERVO_TRAVEL_DEG + 90);
   assertMotor(true);
   assert(phase == IDLE);
@@ -124,6 +136,7 @@ int main() {
   assertAck("active", "done");
   std::cout << "PASS: rejeicao durante ciclo preserva o posicionamento ativo\n";
 
+  // A desconexão durante um ciclo mantém o transporte parado; a reconexão não repete o movimento.
   cycle("offline");
   onWebSocketEvent(WStype_DISCONNECTED, nullptr, 0);
   advance(200);
@@ -139,6 +152,7 @@ int main() {
   assertAck("offline", "done");
   std::cout << "PASS: desconexao para; reconexao retoma sem repetir movimento\n";
 
+  // Força o relógio a atravessar o limite de uint32_t para validar a temporização por diferença.
   fakeNow = UINT32_MAX - 100;
   cycle("wrap");
   advance(199);
@@ -167,6 +181,7 @@ int main() {
   assertMotor(true);
   std::cout << "PASS: bloqueio termico persiste ate liberacao explicita da sessao\n";
 
+  // A conclusão do posicionamento não deve contornar uma trava térmica aplicada durante o ciclo.
   cycle("heat-in-cycle");
   receive(R"({"type":"thermal_control","session_id":"test","blocked":true})");
   advance(200);
@@ -179,6 +194,7 @@ int main() {
   assertMotor(true);
   std::cout << "PASS: fim do ciclo nao religa durante bloqueio termico\n";
 
+  // Pausa do operador permanece válida após o ciclo e após uma liberação térmica.
   cycle("pause-in-cycle");
   receive(R"({"type":"triage_control","session_id":"test","enabled":false})");
   advance(200);

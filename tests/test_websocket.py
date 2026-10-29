@@ -1,3 +1,5 @@
+# MONITORAMENTO: inicia um servidor local e compara os retratos recebidos por HTTP e WebSocket.
+# Execução: python -m unittest discover -s tests -v. Não precisa ligar motores.
 """Integração HTTP/WebSocket, sem precisar da câmera ou da ESP32.
 
 Execute: python -m unittest discover -s tests -v
@@ -15,7 +17,9 @@ import config
 import vision
 
 
+# Casos de comunicação: servidor e clientes locais reais, sem conexão à ESP32 física.
 class WebSocketTests(unittest.TestCase):
+    # Prepara os recursos compartilhados uma única vez para os testes desta classe.
     @classmethod
     def setUpClass(cls):
         cls.server = make_server('127.0.0.1', 0, app.app, threaded=True)
@@ -23,12 +27,14 @@ class WebSocketTests(unittest.TestCase):
         cls.thread.start()
         cls.url = f'ws://127.0.0.1:{cls.server.server_port}{config.WS_PATH}'
 
+    # Encerra o servidor compartilhado e aguarda sua thread ao terminar os testes da classe.
     @classmethod
     def tearDownClass(cls):
         cls.server.shutdown()
         cls.server.server_close()
         cls.thread.join(timeout=3)
 
+    # Prepara um cenário isolado antes de cada teste; patches são restaurados para não contaminar os demais.
     def setUp(self):
         self.clients = []
         with vision.lock:
@@ -36,6 +42,7 @@ class WebSocketTests(unittest.TestCase):
             vision.latest_frame = None
             vision.latest_detections = []
 
+    # Fecha conexões e restaura o estado modificado pelo cenário, liberando recursos de rede/thread.
     def tearDown(self):
         for client in self.clients:
             if client.connected:
@@ -43,16 +50,19 @@ class WebSocketTests(unittest.TestCase):
         with vision.lock:
             vision.latest_frame, vision.latest_detections, vision.roi = self.previous
 
+    # Abre um cliente no servidor local do teste e guarda a conexão para fechar ao final.
     def connect(self):
         client = Client.connect(self.url)
         self.clients.append(client)
         return client
 
+    # Espera a mensagem com prazo limitado e a converte de texto JSON para um objeto Python.
     def receive(self, client):
         message = client.receive(timeout=3)
         self.assertIsInstance(message, str)
         return json.loads(message)
 
+    # HTTP e WebSocket devem publicar o mesmo estado, inclusive após reconectar.
     def test_updates_match_http_and_reconnect(self):
         client = self.connect()
         self.assertEqual(self.receive(client), app.app.test_client().get('/api/detections').json)
@@ -79,6 +89,7 @@ class WebSocketTests(unittest.TestCase):
         reconnected = self.connect()
         self.assertEqual(self.receive(reconnected), data)
 
+    # Observadores simultâneos recebem o mesmo retrato e a API valida o ajuste de ROI.
     def test_multiple_clients_and_roi(self):
         first = self.connect()
         second = self.connect()

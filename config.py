@@ -1,3 +1,6 @@
+# CONFIGURAÇÃO CENTRAL: reúne rede, pinos, tempos, posições, limites de visão e simulações.
+# As demais partes importam estes valores; editar este arquivo exige reiniciar o Python.
+# Mantenha credenciais reais fora do repositório e não as copie para comentários ou exemplos.
 """Edite aqui as configurações do computador e da ESP32.
 
 Ao executar app.py, as opções da placa são exportadas para EcoCycleConfig.h.
@@ -59,6 +62,7 @@ BATCH_WEIGHT_RANGES_G = {
     "OUTRO_METAL": (200, 600),
     "REJEITO": (50, 250),
 }
+# Associação didática: a cor representa o material; a câmera não mede sua composição física.
 BATCH_MATERIAL_BY_COLOR = {
     "Laranja": "PLASTICO",
     "Verde-claro": "OUTRO_METAL",  # Alumínio na classificação atual.
@@ -73,6 +77,7 @@ BATCH_MATERIAL_LABELS = {
 }
 
 # Lotes de demonstração enquanto a integração com o backend não está disponível.
+# Cada pesoTotalLoteGramas é inteiro em gramas; esta lista é local enquanto não houver backend.
 AVAILABLE_BATCHES = [
     {"loteId": "LOTE-001", "nome": "Lote de demonstração 01", "pesoTotalLoteGramas": 50000000},
     {"loteId": "LOTE-002", "nome": "Lote de demonstração 02", "pesoTotalLoteGramas": 30000000},
@@ -99,6 +104,7 @@ SORT_SETTLE_MS = 1500  # Aguarde o posicionamento; ajuste com a carga real.
 # Aceita valores decimais de 0 até SERVO_TRAVEL_DEG (180° atualmente).
 # Os ângulos são enviados pelo servidor; reinicie o Python após alterá-los.
 # Roxo/rejeito permanece na identificação e na simulação de peso, sem acionar o servo.
+# Somente cores desta tabela geram sort_cycle; as demais podem continuar visíveis e contabilizadas.
 SORT_TARGETS = {
     "Laranja": {"container": "A", "material": "Plástico", "angle_deg": 0},
     "Verde-claro": {"container": "B", "material": "Alumínio", "angle_deg": 90},
@@ -126,6 +132,7 @@ BACKGROUND_DIFF_THRESHOLD = 35  # Diferença mínima em um canal BGR (0–255).
 BACKGROUND_MIN_CHANGED_RATIO = 0.60  # Fração do contorno diferente do fundo.
 
 # Limites HSV: ajuste conforme a iluminação e os objetos reais.
+# Cada tupla contém limites inferior/superior HSV do OpenCV; uma cor pode ter várias faixas.
 COLOR_RANGES = {
     "Laranja": [((8, 90, 70), (24, 255, 255))],
     "Verde-claro": [((35, 45, 100), (85, 255, 255))],

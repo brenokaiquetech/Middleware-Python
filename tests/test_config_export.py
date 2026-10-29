@@ -1,3 +1,5 @@
+# CONFIGURAÇÃO: valida geração C++, limites de ângulo, isolamento de credenciais e escrita de headers temporários.
+# Execução: python -m unittest discover -s tests -v. Não precisa ligar motores.
 from pathlib import Path
 import tempfile
 import unittest
@@ -7,7 +9,9 @@ import config
 from generate_esp32_config import build_header, write_esp32_config
 
 
+# Agrupa cenários deste componente; cada assert compara o resultado com a regra esperada.
 class ConfigExportTests(unittest.TestCase):
+    # Confere o SG90 em 180° e os três destinos atuais em 0°, 90° e 180°.
     def test_sg90_has_three_material_positions_within_180_degrees(self):
         self.assertEqual(config.SERVO_TRAVEL_DEG, 180)
         self.assertEqual({color: target['angle_deg'] for color, target in config.SORT_TARGETS.items()}, {
@@ -15,6 +19,7 @@ class ConfigExportTests(unittest.TestCase):
         })
         self.assertIn('SERVO_TRAVEL_DEG = 180.0f;', build_header())
 
+    # O diagnóstico compartilha pinos com o cliente sem exportar credenciais de rede.
     def test_servo_diagnostic_header_uses_same_pins_without_wifi_credentials(self):
         source = build_header(include_network=False)
         self.assertNotIn('WIFI_PASSWORD', source)
@@ -23,6 +28,7 @@ class ConfigExportTests(unittest.TestCase):
         self.assertIn(f'SERVO_PIN = {config.SERVO_PIN}UL;', source)
         self.assertIn(f'CONVEYOR_PIN_IB = {config.CONVEYOR_PIN_IB}UL;', source)
 
+    # Verifica a conversão das opções centrais para constantes C++ no header.
     def test_network_and_servo_are_exported_from_config(self):
         with patch.multiple(config, SERVER_PUBLIC_HOST='192.168.1.50', PORT=9001,
                             SORT_WS_PATH='/ws/test', SERVO_PIN=23,
@@ -42,17 +48,20 @@ class ConfigExportTests(unittest.TestCase):
         self.assertIn('CONVEYOR_FORWARD_IA_HIGH = false;', source)
         self.assertNotIn('HOLD_MS', source)
 
+    # Impedir dois atuadores de compartilhar GPIO evita uma configuração elétrica conflitante.
     def test_conflicting_motor_pins_are_rejected(self):
         with patch.object(config, 'CONVEYOR_PIN_IA', config.SERVO_PIN):
             with self.assertRaises(ValueError):
                 build_header()
 
+    # Um destino acima do curso deve falhar na geração, antes de compilar a placa.
     def test_angle_outside_servo_travel_is_rejected_before_upload(self):
         with patch.multiple(config, SERVO_TRAVEL_DEG=180,
                             SORT_TARGETS={'Roxo': {'angle_deg': 270}}):
             with self.assertRaisesRegex(ValueError, 'Roxo'):
                 build_header()
 
+    # Testa a capacidade genérica do exportador com configuração substituída; não muda o SG90 atual.
     def test_360_degree_servo_accepts_upper_half_and_decimal_angles(self):
         with patch.multiple(config, SERVO_TRAVEL_DEG=360.0, SORT_TARGETS={
             'Laranja': {'angle_deg': 0}, 'Verde-claro': {'angle_deg': 123.5},
@@ -60,6 +69,7 @@ class ConfigExportTests(unittest.TestCase):
         }):
             self.assertIn('SERVO_TRAVEL_DEG = 360.0f;', build_header())
 
+    # Mesmo sob configuração 360°, ângulos negativos, infinitos ou fora do curso são recusados.
     def test_360_degree_servo_rejects_invalid_color_positions(self):
         for angle in (-1, 360.1, float('nan'), float('inf'), True):
             with self.subTest(angle=angle), patch.multiple(
@@ -68,12 +78,14 @@ class ConfigExportTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, 'Roxo'):
                     build_header()
 
+    # Curso deve ser numérico, positivo e finito; booleanos não representam graus.
     def test_invalid_servo_travel_is_rejected(self):
         for travel in (0, -1, float('nan'), float('inf'), True):
             with self.subTest(travel=travel), patch.object(config, 'SERVO_TRAVEL_DEG', travel):
                 with self.assertRaises(ValueError):
                     build_header()
 
+    # Aspas, barras e quebras de linha precisam virar strings C++ válidas sem expor credenciais reais.
     def test_wifi_strings_are_escaped_for_cpp(self):
         with patch.multiple(config, ESP32_WIFI_SSID='Rede "teste"',
                             ESP32_WIFI_PASSWORD='teste\\senha\nlinha'):
@@ -81,6 +93,7 @@ class ConfigExportTests(unittest.TestCase):
         self.assertIn('WIFI_SSID = "Rede \\"teste\\"";', source)
         self.assertIn('WIFI_PASSWORD = "teste\\\\senha\\nlinha";', source)
 
+    # Só regrava quando há diferença de conteúdo e cria a pasta de saída quando necessário.
     def test_write_and_refresh_generated_header(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'sketch' / 'EcoCycleConfig.h'

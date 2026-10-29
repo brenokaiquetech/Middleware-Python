@@ -1,3 +1,4 @@
+// BASE ARDUINO FICTÍCIA: fornece só a API necessária para executar o sketch no computador.
 // Adaptadores de teste: executam o sketch real no computador, sem GPIOs reais.
 #pragma once
 #include <ArduinoJson.h>
@@ -7,6 +8,7 @@
 #include <string>
 #include <vector>
 
+// Adapta a String do Arduino a std::string, inclusive a escrita usada na serialização JSON.
 class String {
  public:
   std::string value;
@@ -21,14 +23,17 @@ class String {
   }
 };
 
+// Ponte para o ArduinoJson real: escreve a String falsa em um campo JSON.
 inline void convertToJson(const String& source, JsonVariant target) {
   target.set(source.value);
 }
 
+// Ponte inversa: lê um campo JSON para a String usada pelo sketch.
 inline void convertFromJson(JsonVariantConst source, String& target) {
   target.value = source.as<std::string>();
 }
 
+// Relógio e GPIOs ficam em memória: os testes controlam o tempo e inspecionam as saídas.
 inline uint32_t fakeNow = 0;
 inline std::map<int, int> pinStates;
 inline unsigned gpioWrites = 0;
@@ -36,11 +41,13 @@ constexpr int LOW = 0, HIGH = 1, OUTPUT = 1;
 inline uint32_t millis() { return fakeNow; }
 inline void delay(uint32_t duration) { fakeNow += duration; }
 inline void pinMode(unsigned, int) {}
+// Cada escrita registra o valor do pino e incrementa um contador para detectar escritas redundantes.
 inline void digitalWrite(unsigned pin, int state) {
   pinStates[pin] = state;
   ++gpioWrites;
 }
 
+// Métodos vazios preservam a interface Serial sem depender de uma porta USB real.
 struct HostSerial {
   void begin(unsigned) {}
   void print(const char*) {}

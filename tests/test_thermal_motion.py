@@ -1,3 +1,5 @@
+# BLOQUEIO E CARGA: verifica liberação manual e fórmulas de força/velocidade fictícias.
+# Execução: python -m unittest discover -s tests -v. Não precisa ligar motores.
 import unittest
 from unittest.mock import patch
 
@@ -7,7 +9,9 @@ from motion import simulated_motion
 from temperature import TemperatureSimulation
 
 
+# Agrupa cenários deste componente; cada assert compara o resultado com a regra esperada.
 class ThermalTests(unittest.TestCase):
+    # Prepara um cenário isolado antes de cada teste; patches são restaurados para não contaminar os demais.
     def setUp(self):
         self.now = 0.0
         self.settings = patch.multiple(config, TEMP_CRITICAL_C=26.0, TEMP_RELEASE_C=25.5,
@@ -16,12 +20,14 @@ class ThermalTests(unittest.TestCase):
         self.addCleanup(self.settings.stop)
         self.sim = TemperatureSimulation(clock=lambda: self.now)
 
+    # Simula funcionamento até ultrapassar o crítico e depois a confirmação de parada térmica pela placa.
     def trip(self):
         self.sim.report(True, False)
         self.now = 10.0
         self.assertTrue(self.sim.snapshot()['thermal_blocked'])
         self.sim.report(False, True)
 
+    # A temperatura reduzida permite liberar, mas nunca remove a trava sozinha.
     def test_critical_temperature_latches_until_manual_release_after_cooling(self):
         self.trip()
         with self.assertRaises(ValueError):
@@ -34,6 +40,7 @@ class ThermalTests(unittest.TestCase):
         self.sim.release_thermal_block()
         self.assertFalse(self.sim.snapshot()['thermal_blocked'])
 
+    # A reconexão preserva o bloqueio e exige confirmação atual da placa para liberar.
     def test_disconnect_preserves_latch_and_requires_recent_stop_confirmation(self):
         self.trip()
         self.sim.disconnect()
@@ -48,6 +55,7 @@ class ThermalTests(unittest.TestCase):
         self.sim.release_thermal_block()
         self.assertFalse(self.sim.snapshot()['thermal_blocked'])
 
+    # Mesmo frio, um motor ainda informado como ligado não permite liberação.
     def test_release_requires_motor_to_be_reported_stopped(self):
         self.trip()
         self.now = 20.0
@@ -56,6 +64,7 @@ class ThermalTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'confirmação'):
             self.sim.release_thermal_block()
 
+    # A rota exige POST e responde conforme calor e condições de confirmação.
     def test_thermal_release_api_rejects_hot_and_accepts_cooled_manual_release(self):
         self.trip()
         with patch.object(app, 'temperature', self.sim):
@@ -69,6 +78,7 @@ class ThermalTests(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             self.assertFalse(response.json['temperature']['thermal_blocked'])
 
+    # Ambiente, limite de liberação, crítico e teto devem formar uma faixa coerente e finita.
     def test_invalid_thresholds_are_rejected(self):
         for critical, release in ((80, 50), (26, 26), (26, 24), (float('nan'), 25)):
             with self.subTest(critical=critical, release=release), \
@@ -76,6 +86,7 @@ class ThermalTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     TemperatureSimulation()
 
+    # Recupera trava da placa, sem deixar um relatório atrasado desfazer a liberação manual.
     def test_first_device_report_restores_latch_after_server_restart(self):
         self.sim.report(False, True)
         self.assertTrue(self.sim.snapshot()['thermal_blocked'])
@@ -88,7 +99,9 @@ class ThermalTests(unittest.TestCase):
         self.assertTrue(self.sim.snapshot()['thermal_blocked'])
 
 
+# Agrupa cenários deste componente; cada assert compara o resultado com a regra esperada.
 class MotionTests(unittest.TestCase):
+    # Prepara um cenário isolado antes de cada teste; patches são restaurados para não contaminar os demais.
     def setUp(self):
         settings = patch.multiple(config, CONVEYOR_ESTIMATED_SPEED_M_S=.1,
                                   SERVO_SIMULATED_FORCE_PER_KG_N=2.0,
@@ -96,10 +109,12 @@ class MotionTests(unittest.TestCase):
         settings.start()
         self.addCleanup(settings.stop)
 
+    # Monta as entradas mínimas de carga e estado para chamar o modelo de velocidade simulada.
     def motion(self, weight, known=True, running=True):
         return simulated_motion({'state_known': known, 'conveyor_running': running},
                                 {'pesoProcessadoGramas': weight})
 
+    # Valida pontos conhecidos da fórmula de carga, força e velocidade simuladas.
     def test_accumulated_weight_increases_force_and_reduces_simulated_speed(self):
         empty, medium, heavy = (self.motion(weight) for weight in (0, 500, 1000))
         self.assertEqual(empty['servo_force_n'], 0)
@@ -110,10 +125,12 @@ class MotionTests(unittest.TestCase):
         self.assertAlmostEqual(heavy['speed_m_s'], .05)
         self.assertTrue(heavy['speed_simulated'])
 
+    # Distingue parada confirmada de ausência de informação no indicador de velocidade.
     def test_stopped_speed_is_zero_and_missing_telemetry_is_unknown(self):
         self.assertEqual(self.motion(1000, running=False)['speed_m_s'], 0)
         self.assertIsNone(self.motion(1000, known=False)['speed_m_s'])
 
+    # Referência de força zero tornaria a fórmula inválida e deve ser recusada.
     def test_invalid_force_reference_is_rejected(self):
         with patch.object(config, 'CONVEYOR_SIMULATED_FORCE_REFERENCE_N', 0):
             with self.assertRaises(ValueError):

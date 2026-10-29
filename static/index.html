@@ -1,3 +1,5 @@
+<!-- DASHBOARD: mostra a visão e as simulações e envia ações explícitas ao servidor HTTP. -->
+<!-- O Python decide permissões e se comunica com a ESP32; esta página não controla GPIOs. -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -5,27 +7,35 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EcoCycle | Visão Computacional</title>
 <style>
+/* Variáveis de cor e estilos gerais da página; CSS não interfere no processamento da câmera. */
 :root{--dark:#104a35;--bg:#f3f7f5;--text:#1b3027;--muted:#65776e;--border:#dce7e0;--orange:#dc7b25;--blue:#288ba1;--green:#16865a}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,"Segoe UI",Arial,sans-serif}
 main{max-width:1200px;margin:auto;padding:28px;display:grid;grid-template-columns:220px minmax(0,1fr);gap:22px;align-items:start}
 .panel{background:white;border:1px solid var(--border);border-radius:15px;padding:18px;box-shadow:0 4px 18px #173b2808;min-width:0}
 .panel h2{font-size:17px;margin:0 0 16px}.muted{color:var(--muted);font-size:13px;line-height:1.55}
+/* Imagem e ROI compartilham o mesmo contêiner; a ROI é uma camada interativa sobre o vídeo. */
 .camera{position:relative;aspect-ratio:4/3;background:#17241d;border-radius:13px;overflow:hidden}
 #feed{display:block;width:100%;height:100%;object-fit:contain}
 #roi{position:absolute;left:15%;top:15%;width:70%;height:70%;border:2px solid #00ed88;background:#00ed880d;cursor:move;touch-action:none}
+/* Oito alças permitem redimensionar pelas bordas ou cantos; arrastar o interior move o retângulo. */
 .handle{position:absolute;width:12px;height:12px;background:#00ed88;border:2px solid #087a4a;border-radius:3px}
 .nw{left:-7px;top:-7px;cursor:nw-resize}.ne{right:-7px;top:-7px;cursor:ne-resize}.sw{left:-7px;bottom:-7px;cursor:sw-resize}.se{right:-7px;bottom:-7px;cursor:se-resize}.n{left:calc(50% - 6px);top:-7px;cursor:n-resize}.s{left:calc(50% - 6px);bottom:-7px;cursor:s-resize}.w{left:-7px;top:calc(50% - 6px);cursor:w-resize}.e{right:-7px;top:calc(50% - 6px);cursor:e-resize}
 .status{padding:12px;background:#e7f5ed;color:var(--dark);border-radius:9px;font-size:13px;margin-top:12px}
 .background-button{width:100%;padding:10px 12px;border:1px solid var(--green);border-radius:8px;background:white;color:var(--dark);font:inherit;font-size:13px;cursor:pointer}.background-button:disabled{opacity:.5;cursor:default}
+/* A aparência do alerta térmico acompanha o estado recebido; esconder o bloco não libera o motor. */
 .thermal-controls{background:#fff0e9;border:1px solid #e7ae91;color:#923d1f;margin-top:14px}.thermal-controls p{margin:0 0 10px;font-size:12px;line-height:1.5}.thermal-controls[hidden]{display:none}.metric-card.warm.critical{border-color:#c55932;background:#fff0e9}
+/* Cabeçalho do lote e botões de início/pausa/retorno, com estados de bloqueio visuais. */
 .operation-bar{grid-column:1/-1;width:100%;display:flex;align-items:center;justify-content:space-between;gap:20px;padding:20px 22px;background:white;border:1px solid var(--border);border-radius:15px}.operation-bar h1{font-size:21px;letter-spacing:-.5px;margin:6px 0;color:var(--dark)}.operation-bar p{font-size:12px;line-height:1.5;color:var(--muted);margin:0}.operation-actions{display:flex;gap:9px;flex-wrap:wrap;flex-shrink:0}.operation-actions button{font:inherit;font-size:12px;border-radius:9px;padding:11px 15px;cursor:pointer;border:1px solid var(--border);background:white;color:var(--dark)}.operation-actions .primary-action{background:var(--dark);color:white;border-color:var(--dark)}.operation-actions button:disabled{opacity:.45;cursor:default}.operation-feedback{grid-column:1/-1;width:100%;font-size:12px;color:var(--muted);margin:-10px 0 0}.operation-feedback.error{color:#a34327}
 @media(max-width:700px){.operation-bar{align-items:flex-start;flex-direction:column;gap:15px;padding:18px}.operation-actions{width:100%}.operation-actions .primary-action{flex:1}.operation-feedback{margin:0}}
 .section-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:20px}.section-heading h2{margin:4px 0 0;font-size:20px;letter-spacing:-.4px}.eyebrow{font-size:10px;font-weight:800;letter-spacing:1.8px;color:var(--green)}.live-badge{background:#e8f5ed;color:var(--dark);padding:7px 10px;border-radius:20px;font-size:10px;white-space:nowrap}.live-badge::before{content:"";display:inline-block;width:6px;height:6px;background:#21a46b;border-radius:50%;margin-right:6px}
+/* Três indicadores principais e a barra de progresso usam os valores fornecidos pela API. */
 .dashboard{margin-top:18px;padding:22px}.metric-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.metric-card{aspect-ratio:1;min-width:0;border:1px solid var(--border);border-radius:16px;padding:18px;display:flex;flex-direction:column;justify-content:space-between;background:#f8faf9}.metric-card.warm{background:#fff8f1;border-color:#f3dfca}.metric-card.cool{background:#f1f8fb;border-color:#d7e9f0}.metric-card.lot{background:#f0f8f3;border-color:#d5e9dc}.metric-label{font-size:12px;font-weight:700;line-height:1.4}.metric-type{display:block;font-size:10px;font-weight:500;color:var(--muted);margin-top:3px}.metric-reading{display:flex;align-items:baseline;gap:5px;white-space:nowrap}.metric-reading strong{font-size:clamp(26px,3.5vw,48px);line-height:1;font-weight:750;letter-spacing:-2px}.metric-reading span{font-size:14px;color:var(--muted)}.warm .metric-reading strong{color:#ba621c}.cool .metric-reading strong{color:#22758b}.lot .metric-reading strong{color:var(--green)}.metric-note{font-size:11px;color:var(--muted);line-height:1.4;margin:0}.lot-progress{appearance:none;width:100%;height:5px;border:0;background:#dcebe1;border-radius:6px;overflow:hidden;margin-top:8px}.lot-progress::-webkit-progress-bar{background:#dcebe1}.lot-progress::-webkit-progress-value{background:var(--green);border-radius:6px}.lot-progress::-moz-progress-bar{background:var(--green);border-radius:6px}
+/* Cartões por material usam cores de legenda e continuam exibindo o peso simulado de rejeitos. */
 .operation-status{margin:14px 0 0;font-size:11px;color:var(--muted);line-height:1.5}.materials-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;padding-top:20px;margin-top:20px;border-top:1px solid var(--border)}.materials-heading h3{font-size:14px;margin:0}.materials-heading span{font-size:10px;color:var(--muted)}.material-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:14px}.material-card{min-width:0;border:1px solid var(--border);border-radius:12px;padding:14px 12px;background:#fff}.material-name{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);font-weight:600}.material-name::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--material-color,#6e8177);flex-shrink:0}.material-card[data-material="PLASTICO"]{--material-color:#e38a37}.material-card[data-material="OUTRO_METAL"]{--material-color:#77b950}.material-card[data-material="METAL"]{--material-color:#49a8c7}.material-card[data-material="REJEITO"]{--material-color:#9c73c9}.material-weight{display:block;font-size:22px;font-weight:750;letter-spacing:-.7px;margin-top:12px;color:var(--dark)}.material-unit{font-size:12px;font-weight:400;letter-spacing:0;margin-left:4px;color:var(--muted)}.batch-summary{font-size:12px;color:var(--muted);line-height:1.6;margin:14px 0 0}.batch-last{font-size:11px;color:var(--muted);line-height:1.5;margin:6px 0 0}
 .list{display:grid;gap:8px;margin-top:12px}.item{border:1px solid var(--border);border-radius:10px;padding:12px;font-size:13px}.item strong{color:var(--dark)}.item small{display:block;color:var(--muted);margin-top:5px}
 .metric-card{position:relative}.metric-reading{position:absolute;left:18px;right:18px;top:50%;transform:translateY(-50%)}
+/* Em telas menores, as colunas viram blocos empilhados; as regras de operação são as mesmas. */
 @media(max-width:900px){main{display:flex;flex-direction:column;padding:12px}.left,.center{width:100%}.camera{aspect-ratio:4/3}}
 @media(max-width:520px){.dashboard{padding:14px}.section-heading{gap:8px;margin-bottom:14px}.section-heading h2{font-size:17px}.live-badge{font-size:9px;padding:6px 8px}.metric-grid{gap:7px}.metric-card{padding:10px;border-radius:12px}.metric-label{font-size:10px}.metric-type{font-size:9px}.metric-reading{gap:3px}.metric-reading strong{font-size:25px;letter-spacing:-1.2px}.metric-reading span{font-size:10px}.metric-note{font-size:9px}.lot-progress{height:3px;margin-top:4px}.material-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.materials-heading span{font-size:9px}.material-weight{font-size:24px}.operation-status{font-size:10px}}
 @media(max-width:520px){.metric-card{position:relative;display:block;min-height:0;overflow:hidden}.metric-label{position:absolute;top:9px;left:9px;right:9px;line-height:1.2}.metric-type{margin-top:2px;font-size:8px}.metric-reading{position:absolute;left:9px;right:6px;top:55%;transform:translateY(-50%)}.metric-note{position:absolute;left:9px;right:6px;bottom:9px;font-size:8px;line-height:1.2}.lot .metric-note{bottom:13px}.lot-progress{position:absolute;left:9px;right:9px;bottom:6px;width:calc(100% - 18px);margin:0}.metric-reading strong{font-size:23px}.metric-reading span{font-size:9px}}
@@ -34,11 +44,13 @@ main{max-width:1200px;margin:auto;padding:28px;display:grid;grid-template-column
 </head>
 <body>
 <main>
+  <!-- Identifica o lote da tela e exige clique para autorizar ou pausar a triagem. -->
   <header class="operation-bar">
     <div><span class="eyebrow">LOTE SELECIONADO</span><h1 id="operationLot">Preparar triagem</h1><p id="operationSummary">Carregando o lote...</p></div>
     <div class="operation-actions"><button type="button" id="backLots">Lotes</button><button type="button" id="pauseTriage" disabled>Pausar triagem</button><button type="button" class="primary-action" id="startTriage" disabled>Iniciar triagem</button></div>
   </header>
   <p class="operation-feedback" id="operationFeedback" role="status">A esteira aguarda o início da triagem.</p>
+  <!-- Estado da câmera e pedido de recaptura do fundo com a esteira vazia. -->
   <section class="left panel">
     <h2>◉ Conexão da câmera</h2>
     <p class="muted">Edite a URL no arquivo config.py se precisar trocar a câmera; depois reinicie o servidor.</p>
@@ -53,7 +65,9 @@ main{max-width:1200px;margin:auto;padding:28px;display:grid;grid-template-column
     <div class="panel">
       <h2>Visualização da esteira</h2>
       <div class="camera" id="camera">
+        <!-- O vídeo vem de /video já anotado pelo Python; não há análise de imagem no navegador. -->
         <img id="feed" src="/video" alt="Fluxo processado pela visão computacional">
+        <!-- Posição inicial proporcional: 15% de margem e 70% da imagem em cada dimensão. -->
         <div id="roi">
           <i class="handle nw" data-handle="nw"></i><i class="handle n" data-handle="n"></i>
           <i class="handle ne" data-handle="ne"></i><i class="handle w" data-handle="w"></i>
@@ -64,9 +78,11 @@ main{max-width:1200px;margin:auto;padding:28px;display:grid;grid-template-column
       <p class="muted">O retângulo verde é a região de interesse (ROI). As caixas de detecção são desenhadas pelo Python no vídeo.</p>
     </div>
     <div class="panel" style="margin-top:14px">
+      <!-- Lista do quadro atual: não é um histórico nem uma fila de peças. -->
       <h2>Detecções em tempo real</h2>
       <div id="detections" class="list"><p class="muted">Aguardando os primeiros resultados...</p></div>
     </div>
+    <!-- Indicadores didáticos: temperatura, velocidade e pesos são simulados, não leituras de sensores. -->
     <section class="panel dashboard" aria-labelledby="dashboardTitle">
       <div class="section-heading">
         <div><span class="eyebrow">DASHBOARD</span><h2 id="dashboardTitle">Visão geral da operação</h2></div>
@@ -90,6 +106,7 @@ main{max-width:1200px;margin:auto;padding:28px;display:grid;grid-template-column
         </article>
       </div>
       <p class="operation-status" id="conveyorState">Aguardando estado da ESP32...</p>
+      <!-- Botão manual só fica disponível quando o servidor confirma temperatura e parada adequadas. -->
       <div class="status thermal-controls" id="thermalControls" hidden>
         <p id="thermalStatus" role="status"></p>
         <button type="button" class="background-button" id="releaseThermal" disabled>Liberar esteira após resfriamento</button>
@@ -105,10 +122,13 @@ main{max-width:1200px;margin:auto;padding:28px;display:grid;grid-template-column
 
 </main>
 <script>
+// Estado local da interface: elementos da ROI, lote da URL e operações HTTP em andamento.
 const roi = document.querySelector("#roi");
 const camera = document.querySelector("#camera");
+// O ID da URL impede que uma aba antiga inicie um lote diferente do que está mostrando.
 let dashboardLotId=new URL(window.location.href).searchParams.get('lote');
 let operationPending=false;
+// Envia iniciar/pausar; bloqueia cliques simultâneos e usa o erro retornado pelo servidor.
 async function operationAction(action,leave=false){
   operationPending=true;
   const feedback=document.querySelector('#operationFeedback');feedback.classList.remove('error');
@@ -116,10 +136,12 @@ async function operationAction(action,leave=false){
   try{
     const response=await fetch(`/api/triagem/${action}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({loteId:dashboardLotId})});
     const data=await response.json();if(!response.ok)throw new Error(data.error||'Não foi possível atualizar a triagem.');
+    // Voltar à lista só navega depois de confirmar a pausa no servidor.
     if(leave){window.location.assign('/');return;}
   }catch(failure){feedback.textContent=failure.message;feedback.classList.add('error');}
   finally{operationPending=false;refresh();}
 }
+// Os botões chamam a API; abrir/recarregar a página nunca chama iniciar por conta própria.
 document.querySelector('#startTriage').addEventListener('click',()=>operationAction('iniciar'));
 document.querySelector('#pauseTriage').addEventListener('click',()=>operationAction('pausar'));
 document.querySelector('#backLots').addEventListener('click',()=>operationAction('pausar',true));
@@ -128,6 +150,7 @@ let backgroundRequestPending = false;
 let backgroundCaptureRequested = false;
 let thermalRequestPending = false;
 const releaseThermalButton = document.querySelector("#releaseThermal");
+// Solicita liberação humana; a API pode recusar se ainda estiver quente ou sem confirmação da ESP32.
 releaseThermalButton.addEventListener("click", async () => {
   thermalRequestPending = true;
   releaseThermalButton.disabled = true;
@@ -145,8 +168,10 @@ releaseThermalButton.addEventListener("click", async () => {
   }
 });
 const backgroundButton = document.querySelector("#captureBackground");
+// Agenda uma nova referência do cenário; o servidor sinaliza quando o aprendizado realmente termina.
 backgroundButton.addEventListener("click", async () => {
   backgroundRequestPending = true;
+  // Diferencia pedido enviado de fundo efetivamente registrado nos quadros seguintes.
   backgroundButton.disabled = true;
   const help = document.querySelector("#backgroundHelp");
   try {
@@ -162,6 +187,7 @@ backgroundButton.addEventListener("click", async () => {
   }
 });
 
+// Converte pixels da tela em frações de 0 a 1, independentes do tamanho do navegador.
 function sendROI() {
   const box = {
     x: roi.offsetLeft / camera.clientWidth,
@@ -175,6 +201,7 @@ function sendROI() {
     body: JSON.stringify(box)
   }).catch(console.error);
 }
+// Registra o ponto inicial e captura o ponteiro para manter o arraste mesmo fora da alça.
 roi.addEventListener("pointerdown", e => {
   e.preventDefault(); e.stopPropagation();
   const h = e.target.closest("[data-handle]");
@@ -183,6 +210,7 @@ roi.addEventListener("pointerdown", e => {
   roiStart = {x:roi.offsetLeft,y:roi.offsetTop,w:roi.offsetWidth,h:roi.offsetHeight};
   roi.setPointerCapture(e.pointerId);
 });
+// Aplica o deslocamento ao lado escolhido e limita tamanho e posição ao contêiner da câmera.
 roi.addEventListener("pointermove", e => {
   if (!dragging) return;
   const dx=e.clientX-pointerStart.x, dy=e.clientY-pointerStart.y;
@@ -198,11 +226,15 @@ roi.addEventListener("pointermove", e => {
   x=Math.max(0,Math.min(x,camera.clientWidth-w)); y=Math.max(0,Math.min(y,camera.clientHeight-h));
   Object.assign(roi.style,{left:x+"px",top:y+"px",width:w+"px",height:h+"px"});
 });
+// Envia a ROI ao terminar o gesto, evitando uma requisição a cada movimento do ponteiro.
 function endDrag(){if(dragging){dragging=null;pointerStart=null;roiStart=null;sendROI();}}
 roi.addEventListener("pointerup",endDrag); roi.addEventListener("pointercancel",endDrag);
 
+// Usa textContent para inserir textos das detecções sem executar HTML desses dados.
 function safeEl(tag, text, className=""){const el=document.createElement(tag);el.textContent=text;if(className)el.className=className;return el;}
+// Um único temporizador e uma consulta por vez evitam multiplicar requisições após ações do operador.
 let refreshTimer=null,refreshing=false;
+// Consulta o retrato completo e atualiza a tela; esta função apenas lê dados da operação.
 async function refresh(){
   if(refreshing)return;
   refreshing=true;clearTimeout(refreshTimer);
@@ -210,6 +242,7 @@ async function refresh(){
     const res=await fetch("/api/detections",{cache:"no-store"});
     if(!res.ok)throw new Error('Não foi possível consultar o estado da operação.');
     const data=await res.json();
+    // Botões dependem das permissões do servidor, da câmera pronta e do lote correto.
     const operation=data.triagem;
     if(!dashboardLotId)dashboardLotId=operation.loteId;
     const matchingLot=!dashboardLotId || dashboardLotId===operation.loteId;
@@ -232,6 +265,7 @@ async function refresh(){
       : !data.background_ready
         ? "Registrando fundo · mantenha a esteira sem carimbinhos."
         : "Câmera pronta · aguardando novos carimbinhos na área verde.";
+    // Estado térmico inclui trava persistente, confirmação da placa e permissão de liberação manual.
     const temp=data.temperature;
     document.querySelector(".metric-card.warm").classList.toggle("critical",temp.thermal_blocked);
     document.querySelector("#thermalControls").hidden=!temp.thermal_blocked;
@@ -243,6 +277,7 @@ async function refresh(){
         : `Bloqueio por temperatura crítica (${temp.critical_c} °C). Aguarde esfriar até ${temp.release_c} °C para liberar.`;
     document.querySelector("#dashboardStatus").textContent="Atualização em tempo real";
     document.querySelector("#temperature").textContent=temp.temperature_c.toLocaleString("pt-BR",{minimumFractionDigits:1,maximumFractionDigits:1});
+    // null significa velocidade desconhecida por falta de telemetria, e não zero confirmado.
     const conveyor=data.conveyor;
     document.querySelector("#conveyorSpeed").textContent=conveyor.speed_m_s===null?"—":conveyor.speed_m_s.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});
     document.querySelector("#conveyorSpeedState").textContent=!conveyor.state_known?"Sem telemetria":conveyor.running?`Força simulada: ${conveyor.servo_force_n.toLocaleString("pt-BR",{maximumFractionDigits:2})} N`:temp.thermal_blocked?"Parada térmica":"Esteira parada";
@@ -251,6 +286,7 @@ async function refresh(){
       : temp.conveyor_running
         ? `Esteira ligada há ${Math.floor(temp.continuous_run_seconds)} s consecutivos.`
         : "Esteira parada · simulação em resfriamento.";
+    // A porcentagem é peso processado / total em gramas; não é contagem de peças.
     const batch=data.batch;
     const percent=batch.pesoTotalLoteGramas>0?Math.min(100,Math.max(0,batch.pesoProcessadoGramas/batch.pesoTotalLoteGramas*100)):null;
     document.querySelector("#batchPercent").textContent=percent===null?"—":percent.toLocaleString("pt-BR",{maximumFractionDigits:1});
@@ -262,6 +298,7 @@ async function refresh(){
     document.querySelector("#batchProgress").textContent=batch.loteId===null?""
       : `${batch.pesoProcessadoGramas.toLocaleString("pt-BR")} g de ${batch.pesoTotalLoteGramas.toLocaleString("pt-BR")} g · Saldo: ${batch.saldoLoteGramas.toLocaleString("pt-BR")} g`;
     const totals=document.querySelector("#batchTotals");totals.replaceChildren();
+    // Ordem visual dos materiais; rejeitos continuam contabilizados mesmo sem destino para o servo.
     const materialOrder=["PLASTICO","OUTRO_METAL","METAL","REJEITO"];
     for(const material of materialOrder){
       const card=safeEl("div","","material-card");card.dataset.material=material;
@@ -269,10 +306,12 @@ async function refresh(){
       const weight=safeEl("strong",batch.loteId===null?"—":(batch.totaisPorMaterial[material]||0).toLocaleString("pt-BR"),"material-weight");
       weight.append(safeEl("span","g","material-unit"));card.append(weight);totals.append(card);
     }
+    // A última peça explica quando o peso foi sorteado ou ajustado ao saldo final do lote.
     const last=batch.ultimaPeca;
     document.querySelector("#batchLast").textContent=last
       ? `Última peça: ${last.pesoSimuladoGramas} g · ${last.tipoCalculo==="AJUSTE_SALDO"?"Peso ajustado ao saldo final":"Peso aleatório simulado"}.`
       : "";
+    // Reconstrói a lista apenas com o quadro atual; caixas e IDs são calculados pela visão.
     const list=document.querySelector("#detections");list.replaceChildren();
     if(!data.detections.length)list.append(safeEl("p","Nenhum objeto das cores permitidas detectado.","muted"));
     for(const d of data.detections){
@@ -281,9 +320,12 @@ async function refresh(){
       card.append(safeEl("small",`Área aproximada: ${d.area} px · ${d.material}`));
       list.append(card);
     }
+  // Falha de comunicação desabilita ações e marca dados como indisponíveis ou possivelmente antigos.
   }catch(e){document.querySelector("#startTriage").disabled=true;document.querySelector("#pauseTriage").disabled=true;document.querySelector("#status").textContent="Não foi possível acessar o servidor Python.";document.querySelector("#dashboardStatus").textContent="Sem comunicação";document.querySelector("#temperature").textContent="—";document.querySelector("#conveyorSpeed").textContent="—";document.querySelector("#conveyorSpeedState").textContent="Sem telemetria";document.querySelector("#batchPercent").textContent="—";document.querySelector("#batchCardState").textContent="Sem comunicação";document.querySelector("#batchProgressBar").value=0;document.querySelector("#conveyorState").textContent="Sem comunicação com o servidor.";document.querySelector("#batchState").textContent="Sem comunicação; os pesos exibidos podem estar desatualizados.";console.error(e);}
+  // Agenda a próxima leitura após terminar a atual, mantendo no máximo uma consulta pendente.
   refreshing=false;refreshTimer=setTimeout(refresh,500);
 }
+// Ao abrir, envia apenas a ROI e começa as consultas; não autoriza o motor.
 window.addEventListener("load",()=>{setTimeout(sendROI,100);refresh();});
 </script>
 </body>

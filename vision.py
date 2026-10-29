@@ -1,3 +1,5 @@
+# VISÃO: bytes da câmera → JPEG → imagem BGR → ROI/cores/fundo → IDs rastreados.
+# As detecções alimentam a separação e o peso simulado antes das anotações do vídeo.
 """Captura da câmera, detecção, rastreamento e frames do vídeo."""
 import config  # Deve carregar antes das bibliotecas numéricas.
 import cv2
@@ -17,11 +19,13 @@ from config import (
     MIN_BOX_HEIGHT, TRACK_DISTANCE, TRACK_TIMEOUT,
 )
 
+# Converte os limites HSV para arrays NumPy uma vez, evitando recriá-los a cada quadro.
 COLOR_RANGES = {
     name: [(np.array(low), np.array(high)) for low, high in ranges]
     for name, ranges in config.COLOR_RANGES.items()
 }
 
+# Estado compartilhado: o lock protege imagem, resultados, ROI e pedidos de recaptura.
 lock = threading.Lock()
 latest_frame = None
 latest_detections = []
@@ -33,6 +37,7 @@ background_filter = BackgroundFilter()
 background_reset_requested = False
 
 
+# Marca um pedido; não troca o filtro enquanto outra thread está analisando a imagem.
 def request_background_capture():
     """A thread da câmera troca o fundo no próximo quadro, antes da detecção."""
     global background_reset_requested, latest_detections
@@ -41,6 +46,7 @@ def request_background_capture():
         latest_detections = []
 
 
+# Recorta a ROI, filtra HSV e fundo, elimina ruído e associa cada centro a um ID recente.
 def detect_objects(frame):
     """Detect colored regions inside the normalized ROI."""
     global next_id, tracks, background_filter, background_reset_requested
@@ -53,6 +59,7 @@ def detect_objects(frame):
             background_reset_requested = False
             tracks = []  # Preserve next_id para não reutilizar IDs já tratados.
 
+    # A ROI vem do navegador em proporções; aqui vira um recorte limitado às dimensões da imagem.
     x1 = max(0, int(current_roi["x"] * width))
     y1 = max(0, int(current_roi["y"] * height))
     x2 = min(width, int((current_roi["x"] + current_roi["w"]) * width))
@@ -61,10 +68,12 @@ def detect_objects(frame):
     if x2 <= x1 or y2 <= y1:
         return [], (x1, y1, x2, y2)
 
+    # O fundo precisa estar pronto antes de qualquer objeto ser liberado para a análise de cores.
     foreground = background_filter.foreground_mask(frame)
     if foreground is None:
         return [], (x1, y1, x2, y2)
 
+    # HSV separa matiz, saturação e brilho, facilitando os intervalos de cor configurados.
     crop = frame[y1:y2, x1:x2]
     hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
     kernel = np.ones((3, 3), np.uint8)
@@ -76,6 +85,7 @@ def detect_objects(frame):
             mask = cv2.bitwise_or(mask, cv2.inRange(hsv, low, high))
 
         # Reduce isolated noise while preserving most object edges.
+        # Abertura remove pontos isolados; fechamento preenche pequenas falhas da máscara.
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
         mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
 
@@ -83,6 +93,7 @@ def detect_objects(frame):
             mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
         )
 
+        # Contornos viram candidatos; tamanho mínimo e proporção descartam manchas e linhas muito finas.
         for contour in contours:
             area = cv2.contourArea(contour)
             if area < MIN_CONTOUR_AREA:
@@ -106,6 +117,7 @@ def detect_objects(frame):
             if changed_pixels / cv2.countNonZero(contour_mask) < config.BACKGROUND_MIN_CHANGED_RATIO:
                 continue
 
+            # As coordenadas voltam ao quadro inteiro; cx/cy servem apenas à associação entre quadros.
             found.append({
                 "x": x1 + bx,
                 "y": y1 + by,
@@ -119,6 +131,7 @@ def detect_objects(frame):
 
     # Basic centroid tracking. This is a lightweight tracker, not a guarantee
     # of unique identity when objects touch, cross, or leave/re-enter the ROI.
+    # O centro mais próximo da mesma cor reaproveita o ID, desde que ainda esteja dentro do timeout.
     now = time.time()
     old_tracks = [t for t in tracks if now - t["seen"] < TRACK_TIMEOUT]
     used_old_ids = set()
@@ -146,6 +159,7 @@ def detect_objects(frame):
 
         item["material"] = "Categoria estimada pela cor"
 
+    # Guarda posição e instante da última observação; o ID não é uma identificação física permanente.
     new_tracks = []
     for item in found:
         new_tracks.append({
@@ -164,8 +178,10 @@ def detect_objects(frame):
     return found, (x1, y1, x2, y2)
 
 
+# Entrega apenas JPEGs decodificados; um fluxo sem quadros válidos provoca reconexão.
 def read_camera_images(response):
     """Descarte quadros inválidos e retome o próximo JPEG completo do fluxo."""
+    # A rede entrega pedaços de bytes, e não necessariamente um JPEG completo por pacote.
     parser = JPEGStreamParser(config.CAMERA_MAX_FRAME_BYTES)
     last_valid = time.monotonic()
     for chunk in response.iter_content(chunk_size=config.CAMERA_CHUNK_SIZE):
@@ -184,9 +200,11 @@ def read_camera_images(response):
             raise ValueError('Fluxo da câmera sem quadros JPEG decodificáveis')
 
 
+# Mantém a leitura da rede independente da análise e limpa o estado ao perder o vídeo.
 def capture_camera(buffer):
     """Drene o vídeo continuamente, mesmo durante a análise de outro quadro."""
     global latest_frame, latest_detections
+    # A sessão reaproveita conexões HTTP; stream=True evita baixar o vídeo inteiro para a memória.
     session = requests.Session()
     while running:
         try:
@@ -208,18 +226,21 @@ def capture_camera(buffer):
             time.sleep(config.CAMERA_RECONNECT_SECONDS)
 
 
+# Despacha detecções autorizadas e publica uma cópia anotada para a página.
 def process_camera_frame(frame):
     """Crie o comando antes de desenhar as caixas e atualizar o vídeo."""
     global latest_frame, latest_detections
     frame = cv2.resize(frame, FRAME_SIZE)
     detections, bounds = detect_objects(frame)
     with lock:
+        # A prévia pode continuar visível antes de iniciar; comandos e pesos recebem uma lista vazia.
         if background_reset_requested or not triage.processing_allowed():
             processing_detections = []
         else:
             processing_detections = detections
         if background_reset_requested:
             detections = []
+        # Primeiro tenta criar o comando, depois contabiliza o peso; desenhar o vídeo vem por último.
         sorter.observe(processing_detections)
         batch_weights.observe(processing_detections)
 
@@ -239,9 +260,11 @@ def process_camera_frame(frame):
         ]
 
 
+# Consome o último quadro disponível, descarta atrasados e mantém o processamento ativo.
 def camera_frames():
     """Analise o quadro mais recente, sem acumular imagens para processar."""
     buffer = LatestCameraFrame()
+    # Uma thread drena a câmera; esta rotina apenas analisa o quadro mais recente disponível.
     threading.Thread(target=capture_camera, args=(buffer,), daemon=True).start()
     while running:
         packet = buffer.take(timeout=0.1)
@@ -256,6 +279,7 @@ def camera_frames():
             print(f'[visão] Quadro descartado: {exc}')
 
 
+# Codifica uma cópia do último resultado em JPEG sem bloquear a visão durante o envio.
 def video_frames():
     while running:
         with lock:
@@ -266,6 +290,7 @@ def video_frames():
         ok, encoded = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, config.VIDEO_JPEG_QUALITY])
         if not ok:
             continue
+        # Cada parte HTTP contém cabeçalho image/jpeg e uma imagem; o navegador monta a sequência visual.
         yield (b"--frame\r\n"
                b"Content-Type: image/jpeg\r\n\r\n" +
                encoded.tobytes() + b"\r\n")
