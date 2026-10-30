@@ -14,10 +14,19 @@ SERVO_TEST_OUTPUT_PATH = OUTPUT_PATH.parents[1] / 'TesteServo' / 'EcoCycleConfig
 
 # Valida curso/ângulos/pinos e monta constantes C++; o teste isolado pode omitir credenciais de rede.
 def build_header(include_network=True):
-    travel = config.SERVO_TRAVEL_DEG
-    if (not isinstance(travel, (int, float)) or isinstance(travel, bool)
-            or not math.isfinite(travel) or travel <= 0):
-        raise ValueError('SERVO_TRAVEL_DEG deve ser um número positivo e finito.')
+    # Cada SG90 tem até 180° físicos; apenas a soma dos eixos alcança 360°.
+    for name in ('SERVO_TRAVEL_DEG', 'SERVO_TOP_TRAVEL_DEG'):
+        travel = getattr(config, name)
+        if (not isinstance(travel, (int, float)) or isinstance(travel, bool)
+                or not math.isfinite(travel) or not 0 < travel <= 180):
+            raise ValueError(f'{name} deve ser finito e estar entre 0 e 180 graus.')
+    travel = config.SERVO_TRAVEL_DEG + config.SERVO_TOP_TRAVEL_DEG
+    for prefix in ('SERVO', 'SERVO_TOP'):
+        low, high = getattr(config, f'{prefix}_MIN_US'), getattr(config, f'{prefix}_MAX_US')
+        if type(low) is not int or type(high) is not int or not 0 < low < high:
+            raise ValueError(f'Pulsos de {prefix} devem ser inteiros positivos com MIN_US < MAX_US.')
+        if type(getattr(config, f'{prefix}_REVERSED')) is not bool:
+            raise ValueError(f'{prefix}_REVERSED deve ser booleano.')
     for color, target in config.SORT_TARGETS.items():
         angle = target.get('angle_deg')
         if (not isinstance(angle, (int, float)) or isinstance(angle, bool)
@@ -46,9 +55,13 @@ def build_header(include_network=True):
     integers = {
         'SERVER_PORT': config.PORT,
         'SERVO_PIN': config.SERVO_PIN,
+        'SERVO_TOP_PIN': config.SERVO_TOP_PIN,
         'SERVO_FREQUENCY_HZ': config.SERVO_FREQUENCY_HZ,
         'SERVO_MIN_US': config.SERVO_MIN_US,
         'SERVO_MAX_US': config.SERVO_MAX_US,
+        'SERVO_TOP_MIN_US': config.SERVO_TOP_MIN_US,
+        'SERVO_TOP_MAX_US': config.SERVO_TOP_MAX_US,
+        'SORT_PROTOCOL_VERSION': config.ESP32_PROTOCOL_VERSION,
         'SERVO_TEST_STEP_MS': config.SERVO_TEST_STEP_MS,
         'CONVEYOR_PIN_IA': config.CONVEYOR_PIN_IA,
         'CONVEYOR_PIN_IB': config.CONVEYOR_PIN_IB,
@@ -66,14 +79,18 @@ def build_header(include_network=True):
         lines.append(f'constexpr unsigned long {name} = {value}UL;')
     lines.extend([
         f'constexpr bool SERVO_CALIBRATED = {str(config.SERVO_CALIBRATED).lower()};',
+        f'constexpr bool SERVO_REVERSED = {str(config.SERVO_REVERSED).lower()};',
+        f'constexpr bool SERVO_TOP_REVERSED = {str(config.SERVO_TOP_REVERSED).lower()};',
         f'constexpr bool CONVEYOR_ENABLED = {str(config.CONVEYOR_ENABLED).lower()};',
         f'constexpr bool CONVEYOR_FORWARD_IA_HIGH = {str(config.CONVEYOR_FORWARD_IA_HIGH).lower()};',
         f'constexpr float SERVO_TRAVEL_DEG = {float(config.SERVO_TRAVEL_DEG)!r}f;',
+        f'constexpr float SERVO_TOP_TRAVEL_DEG = {float(config.SERVO_TOP_TRAVEL_DEG)!r}f;',
+        f'constexpr float PLATE_TRAVEL_DEG = {float(travel)!r}f;',
         '',
     ])
     # Cada função elétrica usa seu próprio GPIO; o gerador recusa pinos compartilhados.
-    if len({config.SERVO_PIN, config.CONVEYOR_PIN_IA, config.CONVEYOR_PIN_IB}) != 3:
-        raise ValueError('SERVO_PIN e os dois pinos da esteira devem ser diferentes.')
+    if len({config.SERVO_PIN, config.SERVO_TOP_PIN, config.CONVEYOR_PIN_IA, config.CONVEYOR_PIN_IB}) != 4:
+        raise ValueError('Os dois servos e os dois pinos da esteira devem usar GPIOs diferentes.')
     return '\n'.join(lines)
 
 

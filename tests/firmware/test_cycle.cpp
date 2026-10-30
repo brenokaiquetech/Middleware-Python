@@ -56,6 +56,12 @@ void assertAck(const char* id, const char* status) {
 // Executa cenários sucessivos sobre o mesmo firmware: partida, ciclo, duplicação e bloqueios.
 int main() {
   assert(SERVO_CALIBRATED && CONVEYOR_ENABLED);
+  // Mesma função usada pelo firmware: limites próprios e inversão afetam só aquele eixo.
+  assert(servoPulseForFraction(0, 500, 2500, false) == 500);
+  assert(servoPulseForFraction(.25f, 500, 2500, false) == 1000);
+  assert(servoPulseForFraction(.5f, 600, 2400, false) == 1500);
+  assert(servoPulseForFraction(.75f, 600, 2400, true) == 1050);
+  assert(servoPulseForFraction(1, 500, 2500, true) == 500);
   setup();
   assertMotor(false);
   advance(500);
@@ -73,16 +79,19 @@ int main() {
   assertMotor(true);  // Nenhum objeto/comando é necessário para manter a esteira.
   assert(gpioWrites == writes);
   assert(plateServo.pulses.empty());
+  assert(topServo.pulses.empty());
   std::cout << "PASS: partida e transporte continuo sem deteccoes\n";
 
   // O primeiro ciclo usa o fim do curso: o pulso esperado deve ser exatamente SERVO_MAX_US.
-  cycle("first", SERVO_TRAVEL_DEG);
+  cycle("first", PLATE_TRAVEL_DEG);
   assertMotor(false);
   advance(199);
   assert(plateServo.pulses.empty());
+  assert(topServo.pulses.empty());
   advance(1);
   assertMotor(false);
   assert(plateServo.pulses.back() == static_cast<int>(SERVO_MAX_US));
+  assert(topServo.pulses.back() == static_cast<int>(SERVO_TOP_MAX_US));
   advance(1499);
   assertMotor(false);
   advance(1);
@@ -94,30 +103,54 @@ int main() {
 
   // A quantidade de pulsos permite descobrir se uma mensagem repetida movimentou o servo novamente.
   auto moves = plateServo.pulses.size();
-  cycle("first", SERVO_TRAVEL_DEG);
+  auto topMoves = topServo.pulses.size();
+  cycle("first", PLATE_TRAVEL_DEG);
   assertMotor(true);
   assert(plateServo.pulses.size() == moves);
+  assert(topServo.pulses.size() == topMoves);
   assertAck("first", "done");
   std::cout << "PASS: comando repetido nao para a esteira nem move o servo\n";
 
-  cycle("upper-half", SERVO_TRAVEL_DEG * .75f);
+  cycle("upper-half", PLATE_TRAVEL_DEG * .75f);
   advance(200);
   assertMotor(false);
   assert(plateServo.pulses.back() > static_cast<int>((SERVO_MIN_US + SERVO_MAX_US) / 2));
   assert(plateServo.pulses.back() < static_cast<int>(SERVO_MAX_US));
+  assert(topServo.pulses.back() > static_cast<int>((SERVO_TOP_MIN_US + SERVO_TOP_MAX_US) / 2));
+  assert(topServo.pulses.back() < static_cast<int>(SERVO_TOP_MAX_US));
   advance(1500);
   assertMotor(true);
   assertAck("upper-half", "done");
   std::cout << "PASS: posicao em 75% do curso usa a metade superior dos pulsos\n";
 
   // Um ângulo além do curso precisa ser rejeitado sem congelar o transporte.
-  cycle("invalid", SERVO_TRAVEL_DEG + 90);
+  // 360° precisa ser aceito, mas valores além da soma física dos cursos não.
+  cycle("invalid", PLATE_TRAVEL_DEG + 90);
   assertMotor(true);
   assert(phase == IDLE);
   assertAck("invalid", "error");
   advance(5000);
   assertMotor(true);
   std::cout << "PASS: angulo invalido nao trava o transporte\n";
+
+  // O meio do prato (180°) corresponde ao meio de cada SG90 (90°), não a um eixo em 180°.
+  cycle("combined-middle", PLATE_TRAVEL_DEG / 2);
+  advance(200);
+  assertMotor(false);
+  assert(plateServo.pulses.back() == static_cast<int>((SERVO_MIN_US + SERVO_MAX_US) / 2));
+  assert(topServo.pulses.back() == static_cast<int>((SERVO_TOP_MIN_US + SERVO_TOP_MAX_US) / 2));
+  advance(1500);
+  assertAck("combined-middle", "done");
+  assertMotor(true);
+
+  // Zero é um extremo absoluto, diferente de normalizar 360° para zero.
+  cycle("combined-zero", 0);
+  advance(200);
+  assert(plateServo.pulses.back() == static_cast<int>(SERVO_MIN_US));
+  assert(topServo.pulses.back() == static_cast<int>(SERVO_TOP_MIN_US));
+  advance(1500);
+  assertMotor(true);
+  std::cout << "PASS: extremos e meio do prato divididos entre os dois servos\n";
 
   stopConveyor();
   assertMotor(false);
@@ -147,8 +180,10 @@ int main() {
   hello();
   assertMotor(true);
   moves = plateServo.pulses.size();
+  topMoves = topServo.pulses.size();
   cycle("offline");
   assert(plateServo.pulses.size() == moves);
+  assert(topServo.pulses.size() == topMoves);
   assertAck("offline", "done");
   std::cout << "PASS: desconexao para; reconexao retoma sem repetir movimento\n";
 
@@ -210,4 +245,12 @@ int main() {
   receive(R"({"type":"triage_control","session_id":"test","enabled":true})");
   assertMotor(true);
   std::cout << "PASS: inicio explicito e pausa persistem no fim do ciclo e na liberacao termica\n";
+
+  // Falha somente no PWM de cima precisa impedir transporte mesmo com a base pronta.
+  topServo.pwmAvailable = false;
+  setup();
+  hello();
+  assert(!servoReady);
+  assertMotor(false);
+  std::cout << "PASS: falha em apenas um servo impede autorizar a esteira\n";
 }

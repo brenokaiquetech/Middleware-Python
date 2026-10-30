@@ -4,8 +4,16 @@ O projeto executa em dois lugares: o computador interpreta as imagens e
 gerencia a operação; a ESP32 recebe instruções e aciona os motores. O navegador
 apresenta os resultados e envia as ações do operador ao computador.
 
+O prato agora usa dois SG90 alinhados, cada um com curso de 180°, somando até
+360°. O destino total é dividido entre eles. Consulte [DOIS_SERVOS.md](DOIS_SERVOS.md)
+para os GPIOs, sentidos, calibração independente e protocolo atualizado.
+
 Os comentários no código explicam as funções, as entradas, o estado compartilhado
 e os motivos dos bloqueios. Eles não alteram os parâmetros nem o funcionamento.
+
+`config.example.py` é o modelo compartilhado sem credenciais reais. Em um clone
+novo, copie-o para `config.py` se esse arquivo ainda não existir e preencha a
+instalação. A configuração local e os headers gerados são ignorados pelo Git.
 
 ## Ordem sugerida de leitura
 

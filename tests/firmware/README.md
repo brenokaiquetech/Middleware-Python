@@ -21,3 +21,6 @@ acionamentos habilitados para esses cenários.
 Os cenários verificam partida sem detecções, parada antes de mover o servo,
 espera de posicionamento, retomada sem outra peça, comandos duplicados ou
 rejeitados, desconexão/reconexão e o estouro do contador `millis()`.
+O posicionamento usa dois SG90: o destino total de 360° exige ambos em 180°;
+180° no prato exige ambos em 90°. Também há cenários para calibração/inversão
+do pulso e falha de inicialização de apenas um dos dois canais PWM.

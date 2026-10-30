@@ -1,10 +1,12 @@
-# ESP32: separar objetos por cor com servo posicional
+# ESP32: separar objetos por cor com dois servos posicionais
 
 O computador interpreta a câmera e a ESP32 controla a esteira e o prato.
 O ciclo é **identificar → parar a esteira → posicionar o recipiente →
 retomar a esteira até identificar outra peça**. O controle
-implementado é para **servo posicional**, com curso em `SERVO_TRAVEL_DEG`, não para
-servo de rotação contínua. Os materiais abaixo são uma associação configurada
+implementado usa **dois SG90 posicionais de 180° com eixos alinhados**. O servo B
+de baixo gira o corpo do servo A de cima, somando até 360° no prato. O curso não
+é contínuo. Veja montagem e calibração em [DOIS_SERVOS.md](DOIS_SERVOS.md).
+Os materiais abaixo são uma associação configurada
 por cor; não são identificados fisicamente pela câmera.
 
 | Cor detectada | Recipiente | Material atribuído | Ângulo inicial |
@@ -12,17 +14,19 @@ por cor; não são identificados fisicamente pela câmera.
 | Laranja | A | Plástico | 0° |
 | Verde-claro | B | Alumínio | 90° |
 | Azul-claro | C | Metal | 180° |
+| Roxo | D | Rejeito | 270° |
 
-Roxo/rejeito fica fora do acionamento: não há comando de parada ou troca de
-recipiente para essa cor. A identificação e a simulação de peso permanecem iguais.
+As quatro cores participam do ciclo de parada e posicionamento. Roxo/rejeito
+usa 270° no prato, correspondentes a 135° em cada um dos dois SG90.
 
 Esses ângulos representam posições do eixo que devem alinhar o recipiente
 com a queda da esteira. A imagem não determina o zero nem o sentido do servo:
 calibre `SORT_TARGETS` em `config.py` na montagem real. Verde e azul continuam
 usando as mesmas faixas HSV anteriores (`Verde-claro` e `Azul-claro`).
-O servo atual é o **SG90 posicional de 180°**. Edite o campo
+O destino corresponde ao **ângulo total do prato**, dividido entre os dois SG90.
+Por exemplo, 270° resultam em 135° em cada eixo. Edite o campo
 `angle_deg` de cada cor no bloco `SORT_TARGETS` do `config.py`. Cada cor aceita
-um valor próprio de 0 a 180°, inclusive valores decimais, como 90,5° (escreva
+um valor próprio de 0 a 360°, inclusive valores decimais, como 90,5° (escreva
 `90.5` no Python). Ajuste os ângulos à posição real dos recipientes.
 Reinicie o Python para aplicar esses valores aos novos comandos. O firmware
 recebe o ângulo no JSON; a tabela de cores permanece centralizada no servidor.
@@ -97,9 +101,19 @@ Não há classificação do formato dos carimbinhos.
 No terminal, dentro da pasta do projeto:
 
 ```powershell
+if (-not (Test-Path -LiteralPath config.py)) {
+    Copy-Item -LiteralPath config.example.py -Destination config.py
+}
+python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 .\.venv\Scripts\python.exe app.py
 ```
+
+Em uma cópia nova do repositório, preencha a rede e confira a calibração no
+`config.py` antes de executar `app.py`. O comando de cópia acima preserva uma
+configuração local que já exista. `config.example.py` é o modelo versionado com
+rede fictícia; `config.py`, `.env`, os headers gerados, o ambiente virtual e os
+caches ficam fora do Git. Não coloque credenciais reais no modelo.
 
 **Edite somente `config.py` para configurar o projeto.** Nele ficam:
 
@@ -149,22 +163,26 @@ conexão, permita o Python/porta TCP 8000 na rede privada pelo Firewall.
 
 Em `config.py` (exportado automaticamente para `EcoCycleConfig.h`):
 
-- `SERVO_PIN`: saída de sinal, inicialmente GPIO 18. Confira sua placa.
+- `SERVO_PIN`: sinal do servo B de baixo, GPIO 18.
+- `SERVO_TOP_PIN`: sinal do servo A de cima, GPIO 19. Confira sua placa.
 - `SERVO_MIN_US`, `SERVO_MAX_US`, `SERVO_FREQUENCY_HZ`: consulte o datasheet
   do modelo e calibre. **500–2500 µs e 50 Hz são valores de exemplo**, não uma
   especificação confirmada do seu servo.
-- `SERVO_TRAVEL_DEG`: atualmente 180°, para o SG90 posicional.
-  A geração da configuração rejeita destinos fora desse curso.
-- `SERVO_CALIBRATED`: inicia em `False`; o firmware recebe os comandos mas
+- `SERVO_TRAVEL_DEG` e `SERVO_TOP_TRAVEL_DEG`: 180° por eixo.
+  A soma gera `PLATE_TRAVEL_DEG = 360°`; destinos além dessa soma são recusados.
+- `SERVO_TOP_MIN_US`, `SERVO_TOP_MAX_US`: calibração independente do servo de cima.
+- `SERVO_REVERSED`, `SERVO_TOP_REVERSED`: invertem o pulso de cada eixo conforme a montagem.
+- `SERVO_CALIBRATED`: quando `False`, o firmware recebe os comandos mas
   responde `error` e não conecta o PWM. Configure os limites reais e então
   mude para `True`, gere o arquivo e regrave a placa para habilitar o acionamento.
 
-A conversão de ângulo para pulso é linear. O firmware usa
+A fração do curso total é aplicada aos dois eixos, respeitando cada calibração.
+Com ambos em 180°, cada servo recebe metade do ângulo final. O firmware usa
 `writeMicroseconds()`: a função `write()` da ESP32Servo limita ângulos a 180°.
 Não use este firmware em um servo contínuo, no qual pulsos controlam velocidade.
 
-Ligue o sinal ao GPIO configurado, o servo a uma fonte compatível com seu
-modelo e una o GND da fonte ao GND da ESP32. A ligação de potência do servo
+Ligue cada sinal ao GPIO configurado, os servos a uma fonte compatível com os
+dois atuadores e una o GND da fonte ao GND da ESP32. A ligação de potência dos servos
 não passa pelo GPIO.
 
 ### Motor da esteira e L9110S
@@ -176,11 +194,12 @@ canal. Os valores iniciais no `config.py` são:
 |---|---|---|
 | Entrada IA do canal do driver | `CONVEYOR_PIN_IA` | GPIO 26 |
 | Entrada IB do mesmo canal | `CONVEYOR_PIN_IB` | GPIO 25 |
-| Sinal do servo | `SERVO_PIN` | GPIO 18 |
+| Sinal do servo B de baixo | `SERVO_PIN` | GPIO 18 |
+| Sinal do servo A de cima | `SERVO_TOP_PIN` | GPIO 19 |
 | Sentido do transporte | `CONVEYOR_FORWARD_IA_HIGH` | `True` |
 
 Confirme os GPIOs disponíveis no seu modelo de ESP32 e adapte à fiação real.
-Os três pinos devem ser diferentes. Motor TT é ligado ao driver; não ao GPIO.
+Os quatro pinos devem ser diferentes. Motor TT é ligado ao driver; não ao GPIO.
 Una o GND da ESP32 ao GND do driver e use alimentação compatível com o motor.
 **IB não pode ficar flutuando.** As duas entradas precisam estar ligadas aos
 GPIOs atuais do `config.py`, no mesmo canal do L9110S. Alterar o código não
@@ -287,14 +306,15 @@ As mensagens da placa incluem `millis()` para comparar esses dois momentos.
 O firmware verifica se a inicialização do PWM foi bem-sucedida e informa
 `PWM ativo` ou `PWM FALHOU` no boot. Isso não confirma movimento físico.
 
-### Teste isolado do SG90
+### Teste isolado dos dois SG90
 
 Se o servo não mover, gere as configurações com
 `python generate_esp32_config.py` e abra `TesteServo/TesteServo.ino` na Arduino
 IDE. Esse sketch usa os mesmos pinos, frequência e pulsos do `config.py` e
 mantém as entradas da esteira em LOW. Não usa câmera nem Wi-Fi.
 
-Com o curso atual de 180°, alterna 90°, 60° e 120° a cada
+Com o curso combinado de 360°, alterna o prato entre 90°, 180° e 270°:
+cada servo passa por 45°, 90° e 135°, respectivamente. A troca acontece a cada
 `SERVO_TEST_STEP_MS` (2000 ms). Teste sem o prato/carga e acompanhe o Monitor
 Serial em 115200 baud. As mensagens indicam os pulsos aplicados. Se o PWM
 inicializar mas o servo não se mover nesse teste, investigue fiação,
@@ -318,9 +338,9 @@ O firmware envia sua identificação automaticamente. Somente uma ESP32 pode usa
 ## Protocolo de comandos
 
 Ao conectar, a placa envia
-`{"type":"client_hello","protocol":2,"operator_start":true}`. O servidor
+`{"type":"client_hello","protocol":3,"servo_count":2,"operator_start":true}`. O servidor
 aguarda essa identificação antes de enviar qualquer `hello`; firmware antigo
-recebe erro e não recebe a instrução que antes causava partida automática.
+recebe erro e não recebe autorização para operar o mecanismo de dois eixos.
 Regrave a ESP32 com o sketch atualizado.
 
 O servidor responde com

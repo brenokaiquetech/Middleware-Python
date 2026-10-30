@@ -1,3 +1,5 @@
+# EXEMPLO VERSIONADO: copie para config.py somente se esse arquivo ainda não existir.
+# Preencha a rede e calibre sua montagem no config.py local, que fica fora do Git.
 # CONFIGURAÇÃO CENTRAL: reúne rede, pinos, tempos, posições, limites de visão e simulações.
 # As demais partes importam estes valores; editar este arquivo exige reiniciar o Python.
 # Mantenha credenciais reais fora do repositório e não as copie para comentários ou exemplos.
@@ -14,22 +16,30 @@ os.environ["OPENBLAS_NUM_THREADS"] = "1"
 os.environ["OMP_NUM_THREADS"] = "1"
 
 # REDE: valores que normalmente mudam ao instalar em outro local.
-CAMERA_URL = "http://10.97.5.5:8080/video"
+CAMERA_URL = "http://192.168.1.101:8080/video"
 #CAMERA_URL = "http://192.168.43.249:8080/video"
-SERVER_PUBLIC_HOST = "192.168.43.37"  # IPv4 do computador na rede da ESP32.
+SERVER_PUBLIC_HOST = "192.168.1.100"
 HOST = "0.0.0.0"  # Interface em que o servidor escuta; não é o IP da ESP32.
 PORT = 8000  # Usada pelo site e pelos WebSockets.
-ESP32_WIFI_SSID = "Uaifai Gratis"
-ESP32_WIFI_PASSWORD = "1122334455"
+ESP32_WIFI_SSID = "SEU_WIFI"
+ESP32_WIFI_PASSWORD = "SUA_SENHA_WIFI"
 
-# ESP32 / SERVO SG90 POSICIONAL DE 180°: calibre conforme a montagem.
+# ESP32 / DOIS SG90 ALINHADOS: o servo de baixo gira o corpo do de cima.
+# O destino do prato é a soma dos dois ângulos, até 360°; não é rotação contínua.
 SERVO_CALIBRATED = True
-SERVO_PIN = 18
+SERVO_PIN = 18  # Servo B de baixo (base), mantém o sinal já usado.
 SERVO_FREQUENCY_HZ = 50
 SERVO_MIN_US = 500  # Exemplo; confirme o pulso mínimo do modelo.
 SERVO_MAX_US = 2500  # Exemplo; confirme o pulso máximo do modelo.
-SERVO_TRAVEL_DEG = 180.0  # SG90 posicional 0–180°.
-SERVO_TEST_STEP_MS = 2000  # Intervalo do sketch de diagnóstico do servo.
+SERVO_TRAVEL_DEG = 180.0  # Curso físico do servo de baixo.
+SERVO_REVERSED = False  # True inverte o pulso para ajustar o sentido da montagem.
+SERVO_TOP_PIN = 19  # Servo A de cima; altere se o sinal estiver em outro GPIO.
+SERVO_TOP_MIN_US = 500
+SERVO_TOP_MAX_US = 2500
+SERVO_TOP_TRAVEL_DEG = 180.0  # Curso físico do servo de cima, relativo à sua base.
+SERVO_TOP_REVERSED = False  # Calibração de sentido independente do servo de baixo.
+SERVO_TEST_STEP_MS = 2000  # Intervalo do diagnóstico dos dois servos.
+ESP32_PROTOCOL_VERSION = 3  # Exige firmware com dois servos e início por operador.
 
 # ESTEIRA / L9110S: entradas IA e IB de um mesmo canal do driver.
 # Confira os pinos da sua montagem antes de habilitar.
@@ -101,14 +111,16 @@ SORT_STOP_MS = 200  # Intervalo entre mandar parar e movimentar o prato.
 SORT_SETTLE_MS = 1500  # Aguarde o posicionamento; ajuste com a carga real.
 
 # EDITE angle_deg DE CADA COR para alinhar os recipientes com a saída.
-# Aceita valores decimais de 0 até SERVO_TRAVEL_DEG (180° atualmente).
+# Ângulo TOTAL do prato: 0 até a soma dos cursos (360° atualmente).
+# Dois cursos de 180°: cada servo recebe metade do destino (270° = 135° + 135°).
 # Os ângulos são enviados pelo servidor; reinicie o Python após alterá-los.
-# Roxo/rejeito permanece na identificação e na simulação de peso, sem acionar o servo.
+# As quatro categorias têm destino no prato, incluindo roxo/rejeito em 270°.
 # Somente cores desta tabela geram sort_cycle; as demais podem continuar visíveis e contabilizadas.
 SORT_TARGETS = {
     "Laranja": {"container": "A", "material": "Plástico", "angle_deg": 0},
     "Verde-claro": {"container": "B", "material": "Alumínio", "angle_deg": 90},
     "Azul-claro": {"container": "C", "material": "Metal", "angle_deg": 180},
+    "Roxo": {"container": "D", "material": "Rejeito", "angle_deg": 270},
 }
 
 # CÂMERA / VISÃO: parâmetros mantidos do processamento original.

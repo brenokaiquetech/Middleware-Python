@@ -255,7 +255,8 @@ class TriageSocketTests(TriageFixture, unittest.TestCase):
         client = Client.connect(self.url)
         self.clients.append(client)
         if modern:
-            client.send(json.dumps({'type': 'client_hello', 'protocol': 2, 'operator_start': True}))
+            client.send(json.dumps({'type': 'client_hello', 'protocol': config.ESP32_PROTOCOL_VERSION,
+                                    'servo_count': 2, 'operator_start': True}))
         return client
 
     # Espera a mensagem com prazo limitado e a converte de texto JSON para um objeto Python.
@@ -265,6 +266,21 @@ class TriageSocketTests(TriageFixture, unittest.TestCase):
     # Firmware sem protocolo de início por operador recebe erro antes de qualquer hello.
     def test_old_firmware_never_receives_auto_start_hello(self):
         client = self.connect(modern=False)
+        self.assertEqual(self.receive(client)['type'], 'error')
+        self.assertFalse(self.operation.snapshot()['device_ready'])
+
+    # Um cliente antigo com apenas um servo não deve autorizar o prato de dois eixos.
+    def test_single_servo_firmware_is_rejected_before_authorization(self):
+        client = self.connect(modern=False)
+        client.send(json.dumps({'type': 'client_hello', 'protocol': 2, 'operator_start': True}))
+        self.assertEqual(self.receive(client)['type'], 'error')
+        self.assertFalse(self.operation.snapshot()['device_ready'])
+
+    # A versão sozinha não substitui a identificação da capacidade de dois servos.
+    def test_current_protocol_without_two_servos_is_rejected(self):
+        client = self.connect(modern=False)
+        client.send(json.dumps({'type': 'client_hello', 'protocol': config.ESP32_PROTOCOL_VERSION,
+                                'servo_count': 1, 'operator_start': True}))
         self.assertEqual(self.receive(client)['type'], 'error')
         self.assertFalse(self.operation.snapshot()['device_ready'])
 

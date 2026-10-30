@@ -60,14 +60,24 @@ class SortingTests(unittest.TestCase):
         self.sorter.observe([{'id': 2, 'color': 'Desconhecida'}])
         self.assertIsNone(self.sorter.current_command())
 
-    # Roxo permanece na visão e no peso, mas não interrompe a esteira para posicionar recipiente.
-    def test_reject_is_identified_but_does_not_trigger_sorting(self):
+    # Roxo usa o quarto recipiente; ocupado não cria fila e cada ID continua sendo tratado uma vez.
+    def test_reject_uses_fourth_container_after_current_cycle_without_queue(self):
         self.assertIn('Roxo', config.COLOR_RANGES)
         self.assertEqual(config.BATCH_MATERIAL_BY_COLOR['Roxo'], 'REJEITO')
+        confirm(self.sorter, 1, 'Laranja')
+        first = self.sorter.current_command()
+        confirm(self.sorter, 99, 'Roxo')
+        self.assertEqual(self.sorter.current_command(), first)
+        self.sorter.acknowledge(first['command_id'], 'done')
+        self.assertIsNone(self.sorter.current_command())
+        confirm(self.sorter, 99, 'Roxo')
+        command = self.sorter.current_command()
+        self.assertEqual(command['container'], 'D')
+        self.assertEqual(command['material'], 'Rejeito')
+        self.assertEqual(command['angle_deg'], 270)
+        self.sorter.acknowledge(command['command_id'], 'done')
         confirm(self.sorter, 99, 'Roxo')
         self.assertIsNone(self.sorter.current_command())
-        confirm(self.sorter, 100, 'Laranja')
-        self.assertEqual(self.sorter.current_command()['track_id'], 100)
 
     # Peças vistas enquanto ocupado precisam de novos quadros após o ciclo; não há fila.
     def test_busy_objects_are_rechecked_in_new_frames_without_queue(self):

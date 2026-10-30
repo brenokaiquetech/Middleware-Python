@@ -40,7 +40,7 @@ def init_websocket(app, get_snapshot, sorter, temperature=None, triage=None):
             ws.close()
             return
         try:
-            # O handshake de protocolo 2 comprova que o firmware exige início explícito por lote.
+            # Protocolo 3 exige os dois servos; firmware antigo não autoriza a operação.
             if triage is not None:
                 triage.set_device_ready(False)
                 raw = ws.receive(timeout=config.ESP32_HANDSHAKE_TIMEOUT_SECONDS)
@@ -49,9 +49,10 @@ def init_websocket(app, get_snapshot, sorter, temperature=None, triage=None):
                 except (ValueError, TypeError):
                     client = None
                 if (not isinstance(client, dict) or client.get('type') != 'client_hello'
-                        or client.get('protocol') != 2 or client.get('operator_start') is not True):
+                        or client.get('protocol') != config.ESP32_PROTOCOL_VERSION
+                        or client.get('servo_count') != 2 or client.get('operator_start') is not True):
                     # Firmware antigo não recebe hello: assim não pode partir sozinho.
-                    ws.send(json.dumps({'type': 'error', 'reason': 'Atualize o firmware para iniciar por lote.'}))
+                    ws.send(json.dumps({'type': 'error', 'reason': 'Atualize o firmware para operar com dois servos.'}))
                     ws.close()
                     return
                 triage.set_device_ready(True)

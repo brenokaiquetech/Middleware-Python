@@ -1,0 +1,27 @@
+# Ambientes virtuais e caches Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Credenciais e configuracao local
+.env
+.env.*
+!.env.example
+/config.py
+
+# Headers gerados a partir do config.py local
+/esp32/EcoCycleClient/EcoCycleConfig.h
+/esp32/TesteServo/EcoCycleConfig.h
+
+# Temporarios e logs
+/tmp/
+*.log
+*.tmp
+
+# Arquivos gerados pelo Windows
+Thumbs.db
+Desktop.ini

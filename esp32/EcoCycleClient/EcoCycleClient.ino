@@ -13,6 +13,7 @@
 // Objetos das bibliotecas: webSocket mantém a conexão e plateServo gera o PWM do servo posicional.
 WebSocketsClient webSocket;
 Servo plateServo;
+Servo topServo;  // Servo A: seu corpo é transportado pelo servo B (plateServo).
 // Sessões e IDs distinguem servidor atual, ciclo em execução e último ciclo já concluído.
 String serverSession;
 String activeCommand;
@@ -34,11 +35,26 @@ uint32_t phaseStarted = 0;
 uint32_t stopDuration = 0;
 uint32_t settleDuration = 0;
 int targetPulseUs = 0;
+int targetTopPulseUs = 0;
 uint32_t lastTelemetryAt = 0;
 
 // Só permite transportar quando servo habilitado, PWM inicializado e esteira habilitada.
 bool hardwareReady() {
   return SERVO_CALIBRATED && servoReady && CONVEYOR_ENABLED;
+}
+
+// A inversão é aplicada ao sinal de cada servo, sem mudar o ângulo lógico do prato.
+int servoPulseForFraction(float fraction, unsigned long minimum, unsigned long maximum, bool reversed) {
+  if (reversed) fraction = 1.0f - fraction;
+  return lroundf(minimum + fraction * (maximum - minimum));
+}
+
+// O ângulo total é dividido proporcionalmente aos cursos, para ambos percorrerem
+// a mesma fração. Dois SG90 de 180° recebem metade do destino, sem ultrapassar 180°.
+void planPlatePosition(float totalAngle) {
+  float fraction = totalAngle / PLATE_TRAVEL_DEG;
+  targetPulseUs = servoPulseForFraction(fraction, SERVO_MIN_US, SERVO_MAX_US, SERVO_REVERSED);
+  targetTopPulseUs = servoPulseForFraction(fraction, SERVO_TOP_MIN_US, SERVO_TOP_MAX_US, SERVO_TOP_REVERSED);
 }
 
 // Publica acionamento declarado e bloqueios; o Python usa essa telemetria na simulação térmica.
@@ -119,7 +135,7 @@ void startSortCycle(JsonDocument& doc) {
   else if (!triageEnabled) reason = "triagem nao iniciada pelo operador";
   else if (phase != IDLE) reason = "ciclo em andamento";
   else if (doc["angle_deg"].isNull() || !isfinite(angle)
-           || angle < 0 || angle > SERVO_TRAVEL_DEG) reason = "angulo fora do curso do servo";
+           || angle < 0 || angle > PLATE_TRAVEL_DEG) reason = "angulo fora do curso combinado do prato";
   else if (settleMs > MAX_MOVEMENT_STAGE_MS || stopMs > MAX_MOVEMENT_STAGE_MS)
     reason = "tempo acima do limite";
   if (reason != nullptr) {
@@ -130,11 +146,8 @@ void startSortCycle(JsonDocument& doc) {
     return;
   }
 
-  // Converte o ângulo dentro do curso configurado em pulso para o servo posicional.
-  // Converta o ângulo recebido em pulso calibrado e use writeMicroseconds().
-  // Interpolação linear: 0° usa SERVO_MIN_US e o fim do curso usa SERVO_MAX_US.
-  targetPulseUs = lroundf(SERVO_MIN_US +
-                         (angle / SERVO_TRAVEL_DEG) * (SERVO_MAX_US - SERVO_MIN_US));
+  // angle_deg continua sendo o destino absoluto do prato, não de um servo isolado.
+  planPlatePosition(angle);
   activeCommand = command;
   activeSession = session;
   stopDuration = stopMs;
@@ -145,8 +158,10 @@ void startSortCycle(JsonDocument& doc) {
   stopConveyor();
   const char* container = doc["container"] | "";
   const char* material = doc["material"] | "";
-  Serial.printf("[%lu ms] Esteira parada. Recipiente %s | %s | %.1f graus | %d us | espera %lu ms\n",
-                (unsigned long)phaseStarted, container, material, angle, targetPulseUs,
+  Serial.printf("[%lu ms] Esteira parada. Recipiente %s | %s | prato %.1f graus | B %.1f graus (%d us) | A %.1f graus (%d us) | espera %lu ms\n",
+                (unsigned long)phaseStarted, container, material, angle,
+                angle * SERVO_TRAVEL_DEG / PLATE_TRAVEL_DEG, targetPulseUs,
+                angle * SERVO_TOP_TRAVEL_DEG / PLATE_TRAVEL_DEG, targetTopPulseUs,
                 (unsigned long)stopDuration);
 }
 
@@ -161,7 +176,8 @@ void onWebSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
       Serial.println("WebSocket conectado.");
       JsonDocument client;
       client["type"] = "client_hello";
-      client["protocol"] = 2;
+      client["protocol"] = SORT_PROTOCOL_VERSION;
+      client["servo_count"] = 2;
       client["operator_start"] = true;
       String text;
       serializeJson(client, text);
@@ -251,10 +267,16 @@ void setup() {
     plateServo.setPeriodHertz(SERVO_FREQUENCY_HZ);
     // attached confirma a alocação do PWM, e não o movimento físico do eixo.
     plateServo.attach(SERVO_PIN, SERVO_MIN_US, SERVO_MAX_US);
-    servoReady = plateServo.attached();
-    Serial.printf("Servo GPIO %lu: PWM %s | curso %.1f graus | %lu Hz | %lu a %lu us\n",
-                  SERVO_PIN, servoReady ? "ativo" : "FALHOU",
+    topServo.setPeriodHertz(SERVO_FREQUENCY_HZ);
+    topServo.attach(SERVO_TOP_PIN, SERVO_TOP_MIN_US, SERVO_TOP_MAX_US);
+    servoReady = plateServo.attached() && topServo.attached();
+    Serial.printf("Servo B baixo GPIO %lu: PWM %s | curso %.1f graus | %lu Hz | %lu a %lu us\n",
+                  SERVO_PIN, plateServo.attached() ? "ativo" : "FALHOU",
                   SERVO_TRAVEL_DEG, SERVO_FREQUENCY_HZ, SERVO_MIN_US, SERVO_MAX_US);
+    Serial.printf("Servo A cima GPIO %lu: PWM %s | curso %.1f graus | %lu Hz | %lu a %lu us\n",
+                  SERVO_TOP_PIN, topServo.attached() ? "ativo" : "FALHOU",
+                  SERVO_TOP_TRAVEL_DEG, SERVO_FREQUENCY_HZ, SERVO_TOP_MIN_US, SERVO_TOP_MAX_US);
+    Serial.printf("Prato com dois servos: curso total %.1f graus.\n", PLATE_TRAVEL_DEG);
   } else {
     Serial.println("Servo desabilitado: calibre em config.py, gere a configuracao e reenvie o firmware.");
   }
@@ -285,10 +307,11 @@ void loop() {
   // Após acomodar a parada, aplica o destino uma vez e começa a espera de posicionamento.
   if (phase == STOPPING_CONVEYOR && elapsed >= stopDuration) {
     plateServo.writeMicroseconds(targetPulseUs);
+    topServo.writeMicroseconds(targetTopPulseUs);
     phase = POSITIONING_CONTAINER;
     phaseStarted = millis();
-    Serial.printf("[%lu ms] Servo recebeu %d us. Espera apos parada: %lu ms. Acomodacao: %lu ms.\n",
-                  (unsigned long)millis(), targetPulseUs, (unsigned long)elapsed,
+    Serial.printf("[%lu ms] Servos receberam B %d us e A %d us. Espera apos parada: %lu ms. Acomodacao: %lu ms.\n",
+                  (unsigned long)millis(), targetPulseUs, targetTopPulseUs, (unsigned long)elapsed,
                   (unsigned long)settleDuration);
   // Depois da espera, libera o ciclo e tenta retomar respeitando pausa, calor e conexão.
   } else if (phase == POSITIONING_CONTAINER && elapsed >= settleDuration) {
